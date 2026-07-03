@@ -837,8 +837,8 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                 {activeSection === "prompts" ? (
                     <Panel>
                         <PanelHeader title="公共提示词库" description="这里新增的提示词会出现在用户端“提示词库”；旧的外部仓库提示词已不再加载。" />
-                        <div className="grid gap-6 p-4 xl:grid-cols-[minmax(480px,0.92fr)_minmax(0,1.08fr)] sm:p-5">
-                            <Form className="admin-prompt-form rounded-xl px-5 py-5 sm:px-6" form={promptForm} layout="vertical" requiredMark={false} onFinish={createPrompt}>
+                        <div className="grid gap-8 p-4 sm:p-5 2xl:grid-cols-[minmax(520px,0.86fr)_minmax(0,1.14fr)]">
+                            <Form className="admin-prompt-form rounded-xl px-6 py-6 sm:px-7" form={promptForm} layout="vertical" requiredMark={false} onFinish={createPrompt}>
                                 <div className="admin-prompt-note mb-6 rounded-lg p-4">
                                     <div className="flex items-center gap-2 text-sm font-semibold text-stone-950 dark:text-stone-100">
                                         <Plus className="size-4 text-cyan-600 dark:text-cyan-300" />
@@ -870,7 +870,9 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                                     插入公共提示词
                                 </Button>
                             </Form>
-                            <Table rowKey="id" columns={promptColumns} dataSource={prompts} loading={promptsLoading} pagination={{ pageSize: 6, hideOnSinglePage: true }} size="middle" />
+                            <div className="admin-prompt-table rounded-xl">
+                                <Table rowKey="id" columns={promptColumns} dataSource={prompts} loading={promptsLoading} pagination={{ pageSize: 6, hideOnSinglePage: true }} size="middle" />
+                            </div>
                         </div>
                     </Panel>
                 ) : null}
