@@ -7,8 +7,12 @@ import "./globals.css";
 import React from "react";
 
 export const metadata: Metadata = {
-    title: "Vozeb",
-    description: "面向 AI 图片创作与管理的 Vozeb 工作台",
+    title: "VOZEB",
+    description: "面向 AI 图片创作与管理的 VOZEB 工作台",
+    icons: {
+        icon: [{ url: "/icon.svg", type: "image/svg+xml" }, { url: "/favicon.ico" }],
+        shortcut: "/icon.svg",
+    },
 };
 
 export default function RootLayout({

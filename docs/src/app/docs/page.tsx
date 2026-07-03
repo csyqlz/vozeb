@@ -12,7 +12,7 @@ import { join } from "node:path";
 import type { Metadata } from "next";
 import { getMDXComponents } from "@/components/mdx";
 
-const title = "Vozeb 文档";
+const title = "VOZEB 文档";
 const description =
   "功能说明、操作手册、部署方式、开发文档、商务合作与赞助支持";
 

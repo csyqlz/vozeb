@@ -43,7 +43,7 @@ export default function HomePage() {
             </span>
           </h1>
           <p className="mt-6 max-w-2xl text-base leading-8 text-zinc-600 dark:text-zinc-400">
-            面向图片创作的 Vozeb，把画布编排、AI
+            面向图片创作的 VOZEB，把画布编排、AI
             生成、参考图编辑、提示词库和素材沉淀放在同一个工作流里。
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
@@ -78,7 +78,7 @@ export default function HomePage() {
         <div className="overflow-hidden rounded-2xl lg:w-[108%] lg:max-w-none">
           <img
             src={previewImages[3].src}
-            alt="Vozeb 效果图"
+            alt="VOZEB 效果图"
             className="aspect-[16/10] w-full rounded-xl object-cover"
           />
         </div>

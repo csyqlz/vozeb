@@ -34,7 +34,7 @@ export default async function AdminPage() {
                     <div className="mx-auto flex h-14 max-w-[1440px] items-center justify-between gap-4 px-4 sm:px-6">
                         <Link href="/" className="flex items-center gap-2 text-sm font-semibold text-stone-950 dark:text-stone-100">
                             <span
-                                className="size-5 bg-current"
+                                className="size-7 bg-blue-500 dark:bg-cyan-300"
                                 style={{
                                     mask: "url(/logo.svg) center / contain no-repeat",
                                     WebkitMask: "url(/logo.svg) center / contain no-repeat",

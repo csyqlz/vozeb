@@ -56,17 +56,17 @@ export function AuthForm({ mode, nextPath = "/canvas", registrationEnabled = tru
                 <section className="flex min-h-[360px] flex-col justify-between border-b border-stone-200 bg-stone-950 p-8 text-white md:border-b-0 md:border-r dark:border-stone-800">
                     <Link href="/" className="inline-flex items-center gap-2 text-sm font-semibold">
                         <span
-                            className="size-6 bg-current"
+                            className="size-8 bg-cyan-300"
                             style={{
                                 mask: "url(/logo.svg) center / contain no-repeat",
                                 WebkitMask: "url(/logo.svg) center / contain no-repeat",
                             }}
                         />
-                        Vozeb
+                        VOZEB
                     </Link>
                     <div>
                         <p className="text-sm text-stone-400">{firstUser ? "首次设置" : isRegister ? "创建账号" : "账号访问"}</p>
-                        <h1 className="mt-3 text-balance text-3xl font-semibold tracking-normal">{firstUser ? "创建第一个管理员账号" : isRegister ? "注册后进入 Vozeb 工作台" : "登录继续你的 Vozeb 创作"}</h1>
+                        <h1 className="mt-3 text-balance text-3xl font-semibold tracking-normal">{firstUser ? "创建第一个管理员账号" : isRegister ? "注册后进入 VOZEB 工作台" : "登录继续你的 VOZEB 创作"}</h1>
                     </div>
                     <p className="max-w-sm text-sm leading-6 text-stone-400">账号系统只负责身份和权限，画布、素材、模型等原有工作流会保留在登录后的主界面里。</p>
                 </section>

@@ -26,13 +26,13 @@ export function AppTopNav() {
                         <div className="flex min-w-0 items-center">
                             <Link href="/" className="flex h-full shrink-0 items-center gap-2 text-sm font-semibold leading-none tracking-tight text-stone-950 transition hover:text-stone-600 dark:text-stone-100 dark:hover:text-stone-300">
                                 <span
-                                    className="size-5 shrink-0 bg-current"
+                                    className="size-7 shrink-0 bg-blue-500 dark:bg-cyan-300"
                                     style={{
                                         mask: "url(/logo.svg) center / contain no-repeat",
                                         WebkitMask: "url(/logo.svg) center / contain no-repeat",
                                     }}
                                 />
-                                <span className="text-base font-medium">Vozeb</span>
+                                <span className="text-base font-medium">VOZEB</span>
                             </Link>
 
                             <button
