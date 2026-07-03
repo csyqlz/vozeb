@@ -31,10 +31,10 @@ export default async function AdminPage() {
         >
             <main className="h-dvh overflow-y-auto bg-stone-100 text-stone-950 dark:bg-stone-950 dark:text-stone-100">
                 <header className="sticky top-0 z-20 border-b border-stone-200 bg-white/95 backdrop-blur-xl dark:border-stone-800 dark:bg-stone-950/95">
-                    <div className="mx-auto flex h-14 max-w-[1440px] items-center justify-between gap-4 px-4 sm:px-6">
-                        <Link href="/" className="flex items-center gap-2 text-sm font-semibold text-stone-950 dark:text-stone-100">
+                    <div className="mx-auto flex h-16 max-w-[1440px] items-center justify-between gap-4 px-4 sm:px-6">
+                        <Link href="/" className="flex items-center gap-2.5 text-base font-semibold text-stone-950 dark:text-stone-100">
                             <span
-                                className="size-7 bg-stone-950 dark:bg-white"
+                                className="size-8 bg-stone-950 dark:bg-white"
                                 style={{
                                     mask: "url(/logo.svg) center / contain no-repeat",
                                     WebkitMask: "url(/logo.svg) center / contain no-repeat",
