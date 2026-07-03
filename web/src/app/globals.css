@@ -323,6 +323,7 @@
         border-bottom: 1px solid rgba(15, 23, 42, 0.08);
         box-shadow: 0 12px 34px rgba(15, 23, 42, 0.06);
         backdrop-filter: blur(18px);
+        -webkit-backdrop-filter: blur(18px);
     }
 
     .app-shell-header {
@@ -330,6 +331,7 @@
         border-bottom: 1px solid rgba(15, 23, 42, 0.08);
         box-shadow: 0 10px 28px rgba(15, 23, 42, 0.045);
         backdrop-filter: blur(18px);
+        -webkit-backdrop-filter: blur(18px);
     }
 
     .dark .landing-site-header {
@@ -338,9 +340,13 @@
     }
 
     .dark .app-shell-header {
-        background: rgba(2, 6, 23, 0.82);
-        border-bottom-color: rgba(255, 255, 255, 0.08);
-        box-shadow: 0 12px 34px rgba(0, 0, 0, 0.24);
+        background: rgba(5, 8, 18, 0.64);
+        border-bottom-color: rgba(255, 255, 255, 0.1);
+        box-shadow:
+            0 12px 36px rgba(0, 0, 0, 0.28),
+            inset 0 1px 0 rgba(255, 255, 255, 0.06);
+        backdrop-filter: blur(28px) saturate(1.8);
+        -webkit-backdrop-filter: blur(28px) saturate(1.8);
     }
 
     .landing-nav-pill,
@@ -352,6 +358,7 @@
             0 14px 36px rgba(15, 23, 42, 0.07),
             inset 0 1px 0 rgba(255, 255, 255, 0.72);
         backdrop-filter: blur(20px) saturate(1.35);
+        -webkit-backdrop-filter: blur(20px) saturate(1.35);
         padding: 4px;
     }
 
@@ -379,6 +386,7 @@
             0 8px 22px rgba(15, 23, 42, 0.09),
             inset 0 1px 0 rgba(255, 255, 255, 0.86);
         backdrop-filter: blur(18px) saturate(1.45);
+        -webkit-backdrop-filter: blur(18px) saturate(1.45);
     }
 
     .app-shell-nav-link.is-active {
@@ -391,6 +399,7 @@
             inset 0 1px 0 rgba(255, 255, 255, 0.95),
             inset 0 -1px 0 rgba(15, 23, 42, 0.04);
         backdrop-filter: blur(18px) saturate(1.55);
+        -webkit-backdrop-filter: blur(18px) saturate(1.55);
     }
 
     .app-shell-mobile-nav-link {
@@ -410,6 +419,7 @@
             0 12px 26px rgba(15, 23, 42, 0.1),
             inset 0 1px 0 rgba(255, 255, 255, 0.92);
         backdrop-filter: blur(18px) saturate(1.45);
+        -webkit-backdrop-filter: blur(18px) saturate(1.45);
     }
 
     .landing-login-button.ant-btn {
@@ -469,44 +479,55 @@
 
     .dark .landing-nav-pill,
     .dark .app-shell-nav-pill {
-        background: rgba(17, 24, 39, 0.42);
-        border-color: rgba(255, 255, 255, 0.1);
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.055)), rgba(20, 24, 34, 0.34);
+        border-color: rgba(255, 255, 255, 0.18);
         box-shadow:
-            0 14px 36px rgba(0, 0, 0, 0.26),
-            inset 0 1px 0 rgba(255, 255, 255, 0.07);
+            0 18px 42px rgba(0, 0, 0, 0.34),
+            0 0 0 1px rgba(255, 255, 255, 0.035),
+            inset 0 1px 0 rgba(255, 255, 255, 0.18),
+            inset 0 -1px 0 rgba(255, 255, 255, 0.055);
+        backdrop-filter: blur(30px) saturate(1.85);
+        -webkit-backdrop-filter: blur(30px) saturate(1.85);
     }
 
     .dark .app-shell-nav-link {
-        color: rgba(231, 229, 228, 0.74);
+        color: rgba(245, 245, 244, 0.78);
     }
 
     .dark .app-shell-nav-link:hover {
-        background: linear-gradient(180deg, rgba(255, 255, 255, 0.13), rgba(255, 255, 255, 0.06));
-        border-color: rgba(255, 255, 255, 0.12);
+        background: radial-gradient(circle at 26% 12%, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0) 42%), linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.07));
+        border-color: rgba(255, 255, 255, 0.2);
         color: #ffffff;
         box-shadow:
-            0 10px 24px rgba(0, 0, 0, 0.28),
-            inset 0 1px 0 rgba(255, 255, 255, 0.1);
+            0 10px 24px rgba(0, 0, 0, 0.3),
+            inset 0 1px 0 rgba(255, 255, 255, 0.22),
+            inset 0 -1px 0 rgba(255, 255, 255, 0.07);
+        backdrop-filter: blur(22px) saturate(1.9);
+        -webkit-backdrop-filter: blur(22px) saturate(1.9);
     }
 
     .dark .app-shell-nav-link.is-active {
-        background: radial-gradient(circle at 22% 16%, rgba(255, 255, 255, 0.26), rgba(255, 255, 255, 0) 42%), linear-gradient(180deg, rgba(255, 255, 255, 0.19), rgba(255, 255, 255, 0.08));
-        border-color: rgba(255, 255, 255, 0.16);
+        background: radial-gradient(circle at 22% 14%, rgba(255, 255, 255, 0.42), rgba(255, 255, 255, 0) 43%), linear-gradient(180deg, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0.105));
+        border-color: rgba(255, 255, 255, 0.28);
         color: #ffffff;
         box-shadow:
-            0 14px 28px rgba(0, 0, 0, 0.34),
-            0 0 18px rgba(103, 232, 249, 0.08),
-            inset 0 1px 0 rgba(255, 255, 255, 0.18),
-            inset 0 -1px 0 rgba(255, 255, 255, 0.06);
+            0 14px 32px rgba(0, 0, 0, 0.38),
+            0 0 20px rgba(255, 255, 255, 0.055),
+            inset 0 1px 0 rgba(255, 255, 255, 0.34),
+            inset 0 -1px 0 rgba(255, 255, 255, 0.11);
+        backdrop-filter: blur(24px) saturate(2);
+        -webkit-backdrop-filter: blur(24px) saturate(2);
     }
 
     .dark .app-shell-mobile-nav-link:hover,
     .dark .app-shell-mobile-nav-link.is-active {
-        background: radial-gradient(circle at 20% 18%, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0) 44%), linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.06));
-        border-color: rgba(255, 255, 255, 0.13);
+        background: radial-gradient(circle at 20% 18%, rgba(255, 255, 255, 0.32), rgba(255, 255, 255, 0) 44%), linear-gradient(180deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.07));
+        border-color: rgba(255, 255, 255, 0.22);
         box-shadow:
             0 12px 28px rgba(0, 0, 0, 0.32),
-            inset 0 1px 0 rgba(255, 255, 255, 0.12);
+            inset 0 1px 0 rgba(255, 255, 255, 0.24);
+        backdrop-filter: blur(22px) saturate(1.85);
+        -webkit-backdrop-filter: blur(22px) saturate(1.85);
     }
 
     .landing-theme-toggle {
