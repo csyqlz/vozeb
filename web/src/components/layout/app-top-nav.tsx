@@ -37,51 +37,49 @@ export function AppTopNav() {
     return (
         <>
             {!hideHeader ? (
-                <header className="sticky top-0 z-20 h-[72px] shrink-0 border-b border-stone-200 bg-background/90 backdrop-blur-xl dark:border-stone-800">
-                    <div className="mx-auto flex h-full max-w-7xl items-stretch justify-between gap-5 px-6">
-                        <div className="flex min-w-0 items-center">
+                <header className="app-shell-header sticky top-0 z-20 h-[68px] shrink-0 sm:h-[74px]">
+                    <div className="mx-auto grid h-full max-w-7xl grid-cols-[1fr_auto] items-center gap-3 px-3 sm:px-6 lg:grid-cols-[1fr_auto_1fr]">
+                        <div className="flex min-w-0 items-center justify-start">
                             <Link href="/" className="flex h-full shrink-0 items-center gap-2.5 text-sm font-semibold leading-none tracking-tight text-stone-950 transition hover:text-stone-600 dark:text-stone-100 dark:hover:text-stone-300">
-                                <SiteLogo logoUrl={site.logoUrl} className="size-8" />
-                                <span className="text-lg font-medium">{site.title || "VOZEB"}</span>
+                                <SiteLogo logoUrl={site.logoUrl} className="size-9" />
+                                <span className="max-w-[34vw] truncate text-xl font-semibold sm:max-w-none">{site.title || "VOZEB"}</span>
                             </Link>
 
                             <button
                                 type="button"
-                                className="ml-3 inline-flex size-8 shrink-0 items-center justify-center text-stone-600 transition hover:text-stone-950 md:hidden dark:text-stone-300 dark:hover:text-white"
+                                className="ml-3 inline-flex size-8 shrink-0 items-center justify-center text-stone-600 transition hover:text-stone-950 lg:hidden dark:text-stone-300 dark:hover:text-white"
                                 onClick={() => setMobileNavOpen(true)}
                                 aria-label="打开导航菜单"
                                 title="导航菜单"
                             >
                                 <Menu className="size-5" />
                             </button>
-
-                            <nav className="hide-scrollbar ml-9 hidden h-[72px] min-w-0 items-center gap-8 overflow-x-auto md:flex">
-                                {navigationTools.map((tool) => {
-                                    const Icon = tool.icon;
-                                    const active = tool.slug === activeToolSlug;
-                                    return (
-                                        <Link
-                                            key={tool.slug}
-                                            href={`/${tool.slug}`}
-                                            prefetch
-                                            onMouseEnter={() => router.prefetch(`/${tool.slug}`)}
-                                            onFocus={() => router.prefetch(`/${tool.slug}`)}
-                                            className={cn(
-                                                "relative flex h-[72px] shrink-0 items-center gap-2 text-[15px] leading-6 transition after:absolute after:inset-x-0 after:bottom-0 after:h-px",
-                                                active
-                                                    ? "font-medium text-stone-950 after:bg-stone-950 dark:text-stone-100 dark:after:bg-stone-100"
-                                                    : "text-stone-500 after:bg-transparent hover:text-stone-950 dark:text-stone-400 dark:hover:text-stone-100",
-                                            )}
-                                        >
-                                            <Icon className="size-[18px]" />
-                                            <span className="truncate">{tool.label}</span>
-                                        </Link>
-                                    );
-                                })}
-                            </nav>
                         </div>
 
-                        <div className="my-auto flex h-9 min-w-0 items-center justify-end gap-2 justify-self-end whitespace-nowrap">
+                        <nav className="app-shell-nav-pill hide-scrollbar hidden min-w-0 items-center gap-1 overflow-x-auto lg:flex">
+                            {navigationTools.map((tool) => {
+                                const Icon = tool.icon;
+                                const active = tool.slug === activeToolSlug;
+                                return (
+                                    <Link
+                                        key={tool.slug}
+                                        href={`/${tool.slug}`}
+                                        prefetch
+                                        onMouseEnter={() => router.prefetch(`/${tool.slug}`)}
+                                        onFocus={() => router.prefetch(`/${tool.slug}`)}
+                                        className={cn(
+                                            "flex h-10 shrink-0 items-center gap-2 rounded-md px-3.5 text-sm font-medium leading-none transition",
+                                            active ? "bg-stone-950 text-white shadow-sm dark:bg-white dark:text-stone-950" : "text-stone-600 hover:bg-stone-950/6 hover:text-stone-950 dark:text-stone-300 dark:hover:bg-white/10 dark:hover:text-white",
+                                        )}
+                                    >
+                                        <Icon className="size-[17px]" />
+                                        <span className="truncate">{tool.label}</span>
+                                    </Link>
+                                );
+                            })}
+                        </nav>
+
+                        <div className="my-auto flex h-9 min-w-0 items-center justify-end gap-1 justify-self-end whitespace-nowrap sm:gap-2">
                             <UserStatusActions />
                         </div>
                     </div>

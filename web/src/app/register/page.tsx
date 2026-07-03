@@ -15,7 +15,7 @@ export default async function RegisterPage({ searchParams }: RegisterPageProps) 
     if (user) redirect(nextPath);
 
     const firstUser = users.length === 0;
-    return <AuthForm mode="register" nextPath={nextPath} registrationEnabled={settings.registrationEnabled || firstUser} firstUser={firstUser} />;
+    return <AuthForm mode="register" nextPath={nextPath} registrationEnabled={settings.registrationEnabled || firstUser} emailRegistrationEnabled={!firstUser && settings.emailRegistrationEnabled} firstUser={firstUser} />;
 }
 
 function firstValue(value: string | string[] | undefined) {

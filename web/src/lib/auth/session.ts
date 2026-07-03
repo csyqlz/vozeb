@@ -44,6 +44,7 @@ export function serializeCurrentUser(user: CurrentUser) {
     return {
         id: user.id,
         username: user.username,
+        email: user.email,
         displayName: user.displayName,
         role: user.role,
         status: user.status,
@@ -60,6 +61,7 @@ export function serializePublicSettings(settings: AuthSettings) {
     return {
         site: settings.site,
         registrationEnabled: settings.registrationEnabled,
+        emailRegistrationEnabled: settings.emailRegistrationEnabled,
         allowUserApiConfig: settings.allowUserApiConfig,
         defaultQuota: settings.defaultQuota,
         checkInReward: settings.checkInReward,

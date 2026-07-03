@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { isAuthInputError, updateUserByAdmin, type UserRole, type UserStatus } from "@/lib/auth/store";
+import { deleteUserByAdmin, isAuthInputError, updateUserByAdmin, type UserRole, type UserStatus } from "@/lib/auth/store";
 import { readJsonBody } from "@/lib/auth/request";
 import { getCurrentUser } from "@/lib/auth/session";
 
@@ -17,10 +17,12 @@ export async function PATCH(request: Request, context: RouteContext) {
 
     try {
         const { id } = await context.params;
-        const body = await readJsonBody<{ displayName?: unknown; role?: unknown; status?: unknown; quota?: unknown }>(request);
-        const patch: { displayName?: string; role?: UserRole; status?: UserStatus; quota?: { imageDaily?: number; videoDaily?: number; textDaily?: number; audioDaily?: number } } = {};
+        const body = await readJsonBody<{ displayName?: unknown; email?: unknown; password?: unknown; role?: unknown; status?: unknown; quota?: unknown }>(request);
+        const patch: { displayName?: string; email?: string; password?: string; role?: UserRole; status?: UserStatus; quota?: { imageDaily?: number; videoDaily?: number; textDaily?: number; audioDaily?: number } } = {};
 
         if (typeof body.displayName === "string") patch.displayName = body.displayName;
+        if (typeof body.email === "string") patch.email = body.email;
+        if (typeof body.password === "string" && body.password) patch.password = body.password;
         if (body.role === "admin" || body.role === "user") patch.role = body.role;
         if (body.status === "active" || body.status === "disabled") patch.status = body.status;
         if (body.quota && typeof body.quota === "object") patch.quota = body.quota as typeof patch.quota;
@@ -31,5 +33,21 @@ export async function PATCH(request: Request, context: RouteContext) {
         if (isAuthInputError(error)) return NextResponse.json({ error: error.message }, { status: error.status });
         console.error("Admin user update failed", error);
         return NextResponse.json({ error: "更新用户失败" }, { status: 500 });
+    }
+}
+
+export async function DELETE(_request: Request, context: RouteContext) {
+    const currentUser = await getCurrentUser();
+    if (!currentUser) return NextResponse.json({ error: "请先登录" }, { status: 401 });
+    if (currentUser.role !== "admin") return NextResponse.json({ error: "需要管理员权限" }, { status: 403 });
+
+    try {
+        const { id } = await context.params;
+        await deleteUserByAdmin(currentUser.id, id);
+        return NextResponse.json({ ok: true });
+    } catch (error) {
+        if (isAuthInputError(error)) return NextResponse.json({ error: error.message }, { status: error.status });
+        console.error("Admin user delete failed", error);
+        return NextResponse.json({ error: "删除用户失败" }, { status: 500 });
     }
 }

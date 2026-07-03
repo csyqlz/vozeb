@@ -8,9 +8,11 @@ export const runtime = "nodejs";
 
 export async function POST(request: Request) {
     try {
-        const body = await readJsonBody<{ username?: string; displayName?: string; password?: string }>(request);
+        const body = await readJsonBody<{ username?: string; email?: string; emailCode?: string; displayName?: string; password?: string }>(request);
         const user = await createUser({
             username: body.username || "",
+            email: body.email,
+            emailCode: body.emailCode,
             displayName: body.displayName,
             password: body.password || "",
         });

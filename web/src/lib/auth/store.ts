@@ -42,9 +42,21 @@ export type SiteSettings = {
     seoKeywords: string;
 };
 
+export type MailSettings = {
+    provider: string;
+    host: string;
+    port: number;
+    secure: boolean;
+    username: string;
+    password: string;
+    fromEmail: string;
+    fromName: string;
+};
+
 export type PublicUser = {
     id: string;
     username: string;
+    email?: string;
     displayName: string;
     role: UserRole;
     status: UserStatus;
@@ -85,9 +97,24 @@ type StoredCheckIn = {
     createdAt: string;
 };
 
+export type EmailCodePurpose = "register" | "email-change" | "password-reset";
+
+type StoredEmailCode = {
+    id: string;
+    purpose: EmailCodePurpose;
+    email: string;
+    userId?: string;
+    codeHash: string;
+    createdAt: string;
+    expiresAt: string;
+    consumedAt?: string;
+};
+
 export type AuthSettings = {
     site: SiteSettings;
     registrationEnabled: boolean;
+    emailRegistrationEnabled: boolean;
+    mail: MailSettings;
     allowUserApiConfig: boolean;
     defaultQuota: UserQuota;
     checkInReward: UserQuota;
@@ -101,6 +128,7 @@ type AuthDatabase = {
     sessions: StoredSession[];
     quotaUsage: StoredQuotaUsage[];
     checkIns: StoredCheckIn[];
+    emailCodes: StoredEmailCode[];
     settings: AuthSettings;
 };
 
@@ -121,6 +149,7 @@ export function isQuotaExceededError(error: unknown): error is QuotaExceededErro
 }
 
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
+const EMAIL_CODE_MAX_AGE_MS = 1000 * 60 * 10;
 export const DEFAULT_USER_QUOTA: UserQuota = { imageDaily: 100, videoDaily: 20, textDaily: 500, audioDaily: 100 };
 export const DEFAULT_CHECK_IN_REWARD: UserQuota = { imageDaily: 5, videoDaily: 1, textDaily: 20, audioDaily: 5 };
 export const DEFAULT_SITE_SETTINGS: SiteSettings = {
@@ -130,9 +159,21 @@ export const DEFAULT_SITE_SETTINGS: SiteSettings = {
     seoDescription: "面向 AI 图片创作与管理的 VOZEB 工作台",
     seoKeywords: "VOZEB,AI 绘图,无限画布,提示词库,素材管理",
 };
+export const DEFAULT_MAIL_SETTINGS: MailSettings = {
+    provider: "QQ 邮箱",
+    host: "smtp.qq.com",
+    port: 465,
+    secure: true,
+    username: "",
+    password: "",
+    fromEmail: "",
+    fromName: "VOZEB",
+};
 const DEFAULT_SETTINGS: AuthSettings = {
     site: DEFAULT_SITE_SETTINGS,
     registrationEnabled: true,
+    emailRegistrationEnabled: false,
+    mail: DEFAULT_MAIL_SETTINGS,
     allowUserApiConfig: true,
     defaultQuota: DEFAULT_USER_QUOTA,
     checkInReward: DEFAULT_CHECK_IN_REWARD,
@@ -206,21 +247,27 @@ export async function consumeUserQuota(userId: string, kind: QuotaKind, amount =
     });
 }
 
-export async function createUser(input: { username: string; displayName?: string; password: string }) {
+export async function createUser(input: { username: string; email?: string; emailCode?: string; displayName?: string; password: string }) {
     return mutateAuthDb((db) => {
         const username = normalizeUsername(input.username);
+        const email = normalizeEmail(input.email);
         const displayName = normalizeDisplayName(input.displayName || username);
         validateUsername(username);
         validatePassword(input.password);
 
         const firstUser = db.users.length === 0;
         if (!firstUser && !db.settings.registrationEnabled) throw new AuthInputError("当前站点已关闭注册");
+        if (!firstUser && db.settings.emailRegistrationEnabled && !email) throw new AuthInputError("请填写邮箱地址");
+        if (email) validateEmail(email);
         if (db.users.some((user) => user.username.toLowerCase() === username.toLowerCase())) throw new AuthInputError("用户名已存在");
+        if (email && db.users.some((user) => user.email?.toLowerCase() === email.toLowerCase())) throw new AuthInputError("邮箱已被注册");
+        if (!firstUser && db.settings.emailRegistrationEnabled) consumeEmailCode(db, { purpose: "register", email, code: input.emailCode });
 
         const now = new Date().toISOString();
         const user: StoredUser = {
             id: randomUUID(),
             username,
+            email: email || undefined,
             displayName,
             role: firstUser ? "admin" : "user",
             status: "active",
@@ -250,6 +297,92 @@ export async function authenticateUser(input: { username: string; password: stri
     });
 
     return toPublicUser({ ...user, lastLoginAt: new Date().toISOString() }, db);
+}
+
+export async function createEmailVerificationCode(input: { purpose: EmailCodePurpose; email: string; userId?: string }) {
+    return mutateAuthDb((db) => {
+        const email = normalizeEmail(input.email);
+        validateEmail(email);
+        const now = new Date();
+
+        if (input.purpose === "register") {
+            if (!db.settings.emailRegistrationEnabled) throw new AuthInputError("当前未开启邮箱注册");
+            if (db.users.some((user) => user.email?.toLowerCase() === email.toLowerCase())) throw new AuthInputError("邮箱已被注册");
+        }
+
+        if (input.purpose === "email-change") {
+            if (!input.userId) throw new AuthInputError("请先登录");
+            if (db.users.some((user) => user.id !== input.userId && user.email?.toLowerCase() === email.toLowerCase())) throw new AuthInputError("邮箱已被注册");
+        }
+
+        if (input.purpose === "password-reset" && !db.users.some((user) => user.email?.toLowerCase() === email.toLowerCase())) {
+            throw new AuthInputError("该邮箱未绑定账号");
+        }
+
+        const code = randomNumericCode();
+        db.emailCodes = db.emailCodes.filter((item) => !(item.purpose === input.purpose && item.email === email && item.userId === input.userId && !item.consumedAt));
+        db.emailCodes.push({
+            id: randomUUID(),
+            purpose: input.purpose,
+            email,
+            userId: input.userId,
+            codeHash: hashToken(code),
+            createdAt: now.toISOString(),
+            expiresAt: new Date(now.getTime() + EMAIL_CODE_MAX_AGE_MS).toISOString(),
+        });
+        return { code, email };
+    });
+}
+
+export async function updateOwnProfile(userId: string, input: { displayName?: string; email?: string; emailCode?: string }) {
+    return mutateAuthDb((db) => {
+        const user = db.users.find((item) => item.id === userId);
+        if (!user || user.status !== "active") throw new AuthInputError("账号不可用");
+
+        if (input.displayName !== undefined) user.displayName = normalizeDisplayName(input.displayName || user.username);
+
+        if (input.email !== undefined) {
+            const email = normalizeEmail(input.email);
+            if (!email) throw new AuthInputError("请填写邮箱地址");
+            validateEmail(email);
+            if (email !== (user.email || "").toLowerCase()) {
+                if (db.users.some((item) => item.id !== user.id && item.email?.toLowerCase() === email)) throw new AuthInputError("邮箱已被注册");
+                consumeEmailCode(db, { purpose: "email-change", email, code: input.emailCode, userId });
+                user.email = email;
+            }
+        }
+
+        user.updatedAt = new Date().toISOString();
+        return toPublicUser(user, db);
+    });
+}
+
+export async function updateOwnPassword(userId: string, input: { currentPassword: string; newPassword: string }) {
+    return mutateAuthDb((db) => {
+        const user = db.users.find((item) => item.id === userId);
+        if (!user || user.status !== "active") throw new AuthInputError("账号不可用");
+        if (!verifyPassword(input.currentPassword, user.passwordHash)) throw new AuthInputError("当前密码不正确");
+        validatePassword(input.newPassword);
+        user.passwordHash = hashPassword(input.newPassword);
+        user.updatedAt = new Date().toISOString();
+        db.sessions = db.sessions.filter((session) => session.userId !== user.id);
+        return toPublicUser(user, db);
+    });
+}
+
+export async function resetPasswordByEmail(input: { email: string; code?: string; newPassword: string }) {
+    return mutateAuthDb((db) => {
+        const email = normalizeEmail(input.email);
+        validateEmail(email);
+        const user = db.users.find((item) => item.email?.toLowerCase() === email);
+        if (!user || user.status !== "active") throw new AuthInputError("该邮箱未绑定可用账号");
+        consumeEmailCode(db, { purpose: "password-reset", email, code: input.code });
+        validatePassword(input.newPassword);
+        user.passwordHash = hashPassword(input.newPassword);
+        user.updatedAt = new Date().toISOString();
+        db.sessions = db.sessions.filter((session) => session.userId !== user.id);
+        return toPublicUser(user, db);
+    });
 }
 
 export async function createSession(userId: string) {
@@ -291,7 +424,7 @@ export async function deleteSession(cookieValue: string | undefined) {
     });
 }
 
-export async function updateUserByAdmin(actorId: string, userId: string, patch: Partial<Pick<PublicUser, "displayName" | "role" | "status">> & { quota?: Partial<UserQuota> }) {
+export async function updateUserByAdmin(actorId: string, userId: string, patch: Partial<Pick<PublicUser, "displayName" | "email" | "role" | "status">> & { quota?: Partial<UserQuota>; password?: string }) {
     return mutateAuthDb((db) => {
         const user = db.users.find((item) => item.id === userId);
         if (!user) throw new AuthInputError("用户不存在");
@@ -303,6 +436,21 @@ export async function updateUserByAdmin(actorId: string, userId: string, patch: 
         if (user.role === "admin" && nextStatus !== "active" && countActiveAdmins(db, user.id) === 0) throw new AuthInputError("至少需要保留一个可用管理员");
 
         if (patch.displayName !== undefined) user.displayName = normalizeDisplayName(patch.displayName || user.username);
+        if (patch.email !== undefined) {
+            const email = normalizeEmail(patch.email);
+            if (email) {
+                validateEmail(email);
+                if (db.users.some((item) => item.id !== user.id && item.email?.toLowerCase() === email)) throw new AuthInputError("邮箱已被注册");
+                user.email = email;
+            } else {
+                user.email = undefined;
+            }
+        }
+        if (patch.password) {
+            validatePassword(patch.password);
+            user.passwordHash = hashPassword(patch.password);
+            db.sessions = db.sessions.filter((session) => session.userId !== user.id);
+        }
         user.role = nextRole;
         user.status = nextStatus;
         if (patch.quota) user.quota = normalizeQuota(patch.quota, db.settings.defaultQuota);
@@ -312,11 +460,27 @@ export async function updateUserByAdmin(actorId: string, userId: string, patch: 
     });
 }
 
+export async function deleteUserByAdmin(actorId: string, userId: string) {
+    return mutateAuthDb((db) => {
+        const user = db.users.find((item) => item.id === userId);
+        if (!user) throw new AuthInputError("用户不存在");
+        if (user.id === actorId) throw new AuthInputError("不能删除当前登录的管理员账号");
+        if (user.role === "admin" && countActiveAdmins(db, user.id) === 0) throw new AuthInputError("至少需要保留一个管理员");
+        db.users = db.users.filter((item) => item.id !== user.id);
+        db.sessions = db.sessions.filter((session) => session.userId !== user.id);
+        db.quotaUsage = db.quotaUsage.filter((usage) => usage.userId !== user.id);
+        db.checkIns = db.checkIns.filter((checkIn) => checkIn.userId !== user.id);
+        db.emailCodes = db.emailCodes.filter((code) => code.userId !== user.id);
+        return { ok: true };
+    });
+}
+
 function toPublicUser(user: StoredUser, db?: AuthDatabase): PublicUser {
     const checkIn = db ? userCheckInState(db, user.id) : { checkedInToday: false, lastCheckInDate: undefined };
     return {
         id: user.id,
         username: user.username,
+        email: user.email,
         displayName: user.displayName,
         role: user.role,
         status: user.status,
@@ -371,12 +535,13 @@ function normalizeDb(db: Partial<AuthDatabase>): AuthDatabase {
         sessions: Array.isArray(db.sessions) ? db.sessions : [],
         quotaUsage: Array.isArray(db.quotaUsage) ? db.quotaUsage.map(normalizeQuotaUsage).filter(Boolean) : [],
         checkIns: Array.isArray(db.checkIns) ? db.checkIns.map(normalizeCheckIn).filter((item) => item.userId) : [],
+        emailCodes: Array.isArray(db.emailCodes) ? db.emailCodes.map(normalizeEmailCode).filter((item) => item.email) : [],
         settings,
     });
 }
 
 function emptyDb(): AuthDatabase {
-    return { version: 1, users: [], sessions: [], quotaUsage: [], checkIns: [], settings: DEFAULT_SETTINGS };
+    return { version: 1, users: [], sessions: [], quotaUsage: [], checkIns: [], emailCodes: [], settings: DEFAULT_SETTINGS };
 }
 
 function pruneExpiredSessions(db: AuthDatabase) {
@@ -386,6 +551,7 @@ function pruneExpiredSessions(db: AuthDatabase) {
     db.quotaUsage = db.quotaUsage.filter((usage) => usage.date >= minDate);
     const minCheckInDate = new Date(now - 1000 * 60 * 60 * 24 * 365).toISOString().slice(0, 10);
     db.checkIns = db.checkIns.filter((checkIn) => checkIn.date >= minCheckInDate);
+    db.emailCodes = (db.emailCodes || []).filter((item) => !item.consumedAt && Date.parse(item.expiresAt) > now);
     return db;
 }
 
@@ -397,6 +563,10 @@ function normalizeUsername(value: string) {
     return value.trim();
 }
 
+function normalizeEmail(value: unknown) {
+    return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
 function normalizeDisplayName(value: string) {
     return value.trim().slice(0, 40);
 }
@@ -406,6 +576,8 @@ function normalizeSettings(settings: AuthSettings): AuthSettings {
     return {
         site: normalizeSiteSettings(settings.site),
         registrationEnabled: Boolean(settings.registrationEnabled),
+        emailRegistrationEnabled: Boolean(settings.emailRegistrationEnabled),
+        mail: normalizeMailSettings(settings.mail),
         allowUserApiConfig: settings.allowUserApiConfig !== false,
         defaultQuota,
         checkInReward: normalizeQuota(settings.checkInReward, DEFAULT_CHECK_IN_REWARD),
@@ -428,6 +600,20 @@ function normalizeSiteSettings(settings: Partial<SiteSettings> | undefined): Sit
         seoTitle,
         seoDescription: normalizeText(settings?.seoDescription, DEFAULT_SITE_SETTINGS.seoDescription, 180),
         seoKeywords: normalizeText(settings?.seoKeywords, DEFAULT_SITE_SETTINGS.seoKeywords, 240),
+    };
+}
+
+function normalizeMailSettings(settings: Partial<MailSettings> | undefined): MailSettings {
+    const port = Math.max(1, Math.min(65535, Math.floor(Number(settings?.port) || DEFAULT_MAIL_SETTINGS.port)));
+    return {
+        provider: normalizeText(settings?.provider, DEFAULT_MAIL_SETTINGS.provider, 40),
+        host: normalizeText(settings?.host, DEFAULT_MAIL_SETTINGS.host, 120),
+        port,
+        secure: settings?.secure !== false,
+        username: normalizeText(settings?.username, DEFAULT_MAIL_SETTINGS.username, 160),
+        password: typeof settings?.password === "string" ? settings.password.slice(0, 512) : DEFAULT_MAIL_SETTINGS.password,
+        fromEmail: normalizeText(settings?.fromEmail, DEFAULT_MAIL_SETTINGS.fromEmail, 160),
+        fromName: normalizeText(settings?.fromName, DEFAULT_MAIL_SETTINGS.fromName, 60),
     };
 }
 
@@ -491,6 +677,28 @@ function normalizeCheckIn(value: Partial<StoredCheckIn>): StoredCheckIn {
     };
 }
 
+function normalizeEmailCode(value: Partial<StoredEmailCode>): StoredEmailCode {
+    return {
+        id: value.id || randomUUID(),
+        purpose: value.purpose === "email-change" || value.purpose === "password-reset" ? value.purpose : "register",
+        email: normalizeEmail(value.email),
+        userId: value.userId,
+        codeHash: value.codeHash || "",
+        createdAt: value.createdAt || new Date().toISOString(),
+        expiresAt: value.expiresAt || new Date(0).toISOString(),
+        consumedAt: value.consumedAt,
+    };
+}
+
+function consumeEmailCode(db: AuthDatabase, input: { purpose: EmailCodePurpose; email: string; code?: string; userId?: string }) {
+    const code = typeof input.code === "string" ? input.code.trim() : "";
+    if (!/^\d{6}$/.test(code)) throw new AuthInputError("请填写 6 位邮箱验证码");
+    const email = normalizeEmail(input.email);
+    const item = db.emailCodes.find((entry) => entry.purpose === input.purpose && entry.email === email && entry.userId === input.userId && !entry.consumedAt && Date.parse(entry.expiresAt) > Date.now());
+    if (!item || item.codeHash !== hashToken(code)) throw new AuthInputError("邮箱验证码不正确或已过期");
+    item.consumedAt = new Date().toISOString();
+}
+
 function addQuota(current: UserQuota, reward: UserQuota): UserQuota {
     return {
         imageDaily: normalizeQuotaNumber(current.imageDaily + reward.imageDaily, current.imageDaily),
@@ -502,7 +710,10 @@ function addQuota(current: UserQuota, reward: UserQuota): UserQuota {
 
 function userCheckInState(db: AuthDatabase, userId: string) {
     const today = currentQuotaDate();
-    const dates = db.checkIns.filter((item) => item.userId === userId).map((item) => item.date).sort();
+    const dates = db.checkIns
+        .filter((item) => item.userId === userId)
+        .map((item) => item.date)
+        .sort();
     const lastCheckInDate = dates[dates.length - 1];
     return { checkedInToday: lastCheckInDate === today, lastCheckInDate };
 }
@@ -529,6 +740,10 @@ function validateUsername(username: string) {
     if (!USERNAME_PATTERN.test(username)) throw new AuthInputError("用户名需为 3-32 位字母、数字、下划线、点或短横线");
 }
 
+function validateEmail(email: string) {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 160) throw new AuthInputError("邮箱格式不正确");
+}
+
 function validatePassword(password: string) {
     if (password.length < 8) throw new AuthInputError("密码至少需要 8 位");
     if (password.length > 128) throw new AuthInputError("密码不能超过 128 位");
@@ -543,4 +758,8 @@ function parseSessionCookie(cookieValue: string | undefined) {
 
 function hashToken(token: string) {
     return createHash("sha256").update(token).digest("hex");
+}
+
+function randomNumericCode() {
+    return String(randomBytes(4).readUInt32BE(0) % 1_000_000).padStart(6, "0");
 }

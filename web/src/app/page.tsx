@@ -114,13 +114,13 @@ export default function HomePage() {
         <main className="animated-dot-bg relative h-dvh overflow-y-auto bg-background text-stone-950 dark:text-stone-100">
             <header className="landing-site-header relative z-10">
                 <div className="mx-auto grid h-20 max-w-7xl grid-cols-[1fr_auto_1fr] items-center gap-4 px-6">
-                    <Link href="/" className="inline-flex items-center gap-3 text-white">
-                        <SiteLogo logoUrl={site.logoUrl} className="size-9" />
-                        <span className="text-xl font-semibold tracking-normal">{site.title || "VOZEB"}</span>
+                    <Link href="/" className="inline-flex min-w-0 items-center gap-3 text-stone-950 dark:text-white">
+                        <SiteLogo logoUrl={site.logoUrl} className="size-9 bg-stone-950 dark:bg-white" />
+                        <span className="truncate text-xl font-semibold tracking-normal">{site.title || "VOZEB"}</span>
                     </Link>
-                    <nav className="landing-nav-pill hidden items-center gap-1 text-sm font-medium text-stone-300 md:flex">
+                    <nav className="landing-nav-pill hidden items-center gap-1 text-sm font-medium text-stone-700 md:flex dark:text-stone-300">
                         {navigationTools.slice(0, 4).map((tool) => (
-                            <Link key={tool.slug} href={`/${tool.slug}`} prefetch className="rounded-md px-4 py-2 transition hover:bg-white/10 hover:text-white">
+                            <Link key={tool.slug} href={`/${tool.slug}`} prefetch className="rounded-md px-4 py-2 transition hover:bg-stone-950/6 hover:text-stone-950 dark:hover:bg-white/10 dark:hover:text-white">
                                 {tool.label}
                             </Link>
                         ))}
@@ -134,11 +134,11 @@ export default function HomePage() {
                 </div>
             </header>
 
-            <section className="relative mx-auto flex min-h-[calc(100dvh-5rem)] max-w-[1500px] items-center justify-center px-6 py-12">
+            <section className="relative mx-auto flex min-h-[calc(100dvh-7rem)] max-w-[1500px] items-center justify-center px-6 pb-8 pt-10">
                 <div className="landing-hero-copy relative z-10 mx-auto w-full max-w-7xl text-center">
-                    <div className="inline-flex items-center gap-2 rounded-md border border-cyan-200/20 bg-cyan-200/8 px-3 py-1.5 text-sm text-cyan-100">
+                    <div className="inline-flex items-center gap-2 rounded-md border border-cyan-300/40 bg-white/70 px-3 py-1.5 text-sm text-stone-700 shadow-sm shadow-cyan-950/5 dark:border-cyan-200/20 dark:bg-cyan-200/8 dark:text-cyan-100">
                         <Sparkles className="size-4" />
-                        v0.5.3 官网式创作入口
+                        v0.6.0 官网式创作入口
                     </div>
                     <div className="hero-title-stage">
                         <div className="hero-title-wrap">
@@ -146,7 +146,7 @@ export default function HomePage() {
                             <HeroCape />
                         </div>
                     </div>
-                    <p className="mx-auto mt-5 max-w-4xl text-balance text-xl leading-9 text-stone-500 dark:text-stone-300">
+                    <p className="mx-auto mt-5 max-w-4xl text-balance text-lg leading-8 text-stone-500 sm:text-xl sm:leading-9 dark:text-stone-300">
                         在{" "}
                         <Highlighter action="underline" color="#FF9800">
                             {site.title || "VOZEB"}
@@ -157,78 +157,90 @@ export default function HomePage() {
                         </Highlighter>
                         ，让创作从单次生成变成连续推演。
                     </p>
-                    <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-                        <Button type="primary" size="large" onClick={() => (user ? router.push(`/${primaryTool.slug}`) : setAuthOpen(true))} icon={<ArrowRight className="size-4" />} iconPlacement="end">
+                    <div className="landing-hero-actions mt-8 flex flex-wrap items-center justify-center gap-4">
+                        <Button className="landing-hero-cta" type="primary" size="large" onClick={() => (user ? router.push(`/${primaryTool.slug}`) : setAuthOpen(true))} icon={<ArrowRight className="size-5" />} iconPlacement="end">
                             开始使用
                         </Button>
-                        <Button size="large" href="/prompts">
+                        <Button className="landing-hero-cta landing-hero-cta-secondary" size="large" href="/prompts">
                             查看提示词库
                         </Button>
                     </div>
-                    <div className="mx-auto mt-9 grid max-w-5xl gap-3 sm:grid-cols-3">
-                        {heroStats.map((item) => {
-                            const Icon = item.icon;
-                            return (
-                                <div key={item.label} className="landing-stat-pill justify-center text-left">
-                                    <Icon className="size-4 text-cyan-200" />
-                                    <div>
-                                        <div className="text-sm font-semibold text-white">{item.value}</div>
-                                        <div className="text-xs text-stone-400">{item.label}</div>
+                    <div className="landing-capability-stage mx-auto mt-10 max-w-6xl">
+                        <div className="landing-stat-grid grid gap-3 sm:grid-cols-3">
+                            {heroStats.map((item) => {
+                                const Icon = item.icon;
+                                return (
+                                    <div key={item.label} className="landing-stat-pill text-left">
+                                        <span className="landing-stat-icon">
+                                            <Icon className="size-4" />
+                                        </span>
+                                        <div>
+                                            <div className="text-sm font-semibold text-stone-950 dark:text-white">{item.value}</div>
+                                            <div className="text-xs text-stone-500 dark:text-stone-400">{item.label}</div>
+                                        </div>
                                     </div>
-                                </div>
-                            );
-                        })}
-                    </div>
-                    <div className="mx-auto mt-5 grid max-w-5xl gap-3 sm:grid-cols-3">
-                        {featureItems.map((item) => {
-                            const Icon = item.icon;
-                            return (
-                                <article key={item.title} className="landing-feature-panel text-left">
-                                    <Icon className="size-5 text-cyan-200" />
-                                    <h2 className="mt-3 text-base font-semibold text-white">{item.title}</h2>
-                                    <p className="mt-2 text-sm leading-6 text-stone-400">{item.text}</p>
-                                </article>
-                            );
-                        })}
+                                );
+                            })}
+                        </div>
+                        <div className="landing-feature-grid mt-4 grid gap-4 sm:grid-cols-3">
+                            {featureItems.map((item) => {
+                                const Icon = item.icon;
+                                return (
+                                    <article key={item.title} className="landing-feature-panel text-left">
+                                        <span className="landing-feature-icon">
+                                            <Icon className="size-5" />
+                                        </span>
+                                        <h2 className="mt-3 text-base font-semibold text-stone-950 dark:text-white">{item.title}</h2>
+                                        <p className="mt-2 text-sm leading-6 text-stone-500 dark:text-stone-400">{item.text}</p>
+                                    </article>
+                                );
+                            })}
+                        </div>
                     </div>
                 </div>
             </section>
 
-            <section className="relative z-10 mx-auto max-w-6xl px-6 pb-20">
-                <div className="mb-8 flex flex-wrap items-end justify-between gap-4 border-t border-white/10 pt-10">
-                    <div>
-                        <h2 className="text-3xl font-semibold text-white">沉淀每一次好结果</h2>
-                        <p className="mt-3 max-w-2xl text-base leading-7 text-stone-400">收藏稳定出图的提示词、参考风格和结果图片，让下一次创作从已有经验开始。</p>
+            <section className="landing-showcase-section relative z-10 mx-auto max-w-[1200px] px-6 pb-20">
+                <div className="landing-showcase-shell">
+                    <div className="landing-showcase-header mb-8 flex flex-wrap items-end justify-between gap-4">
+                        <div>
+                            <h2 className="text-2xl font-semibold text-stone-950 sm:text-3xl dark:text-white">沉淀每一次好结果</h2>
+                            <p className="mt-3 max-w-2xl text-base leading-7 text-stone-600 dark:text-stone-400">收藏稳定出图的提示词、参考风格和结果图片，让下一次创作从已有经验开始。</p>
+                        </div>
+                        <Button type="link" href="/prompts" icon={<ArrowRight className="size-4" />} iconPlacement="end">
+                            查看提示词库
+                        </Button>
                     </div>
-                    <Button type="link" href="/prompts" icon={<ArrowRight className="size-4" />} iconPlacement="end">
-                        查看提示词库
-                    </Button>
-                </div>
-                <div className="grid auto-rows-[190px] gap-4 md:grid-cols-4">
-                    {promptShowcase.map((item, index) => (
-                        <button
-                            key={item.id}
-                            type="button"
-                            onClick={() => {
-                                setPreviewIndex(index);
-                                setPreviewOpen(true);
-                            }}
-                            className={cn("group relative cursor-pointer overflow-hidden border border-white/10 bg-white/5 text-left", index === 0 && "md:col-span-2 md:row-span-2", index === 3 && "md:col-span-2")}
-                        >
-                            <img src={item.coverUrl} alt={item.title} className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]" loading="lazy" referrerPolicy="no-referrer" />
-                            <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 via-black/35 to-transparent p-4 text-white">
-                                <div className="mb-2 flex flex-wrap gap-1.5">
-                                    {item.tags.slice(0, 2).map((tag) => (
-                                        <Tag key={tag} variant="filled" className="m-0 bg-white/15 text-[11px] text-white backdrop-blur">
-                                            {tag}
-                                        </Tag>
-                                    ))}
+                    <div className="grid auto-rows-[190px] gap-4 sm:grid-cols-2 md:grid-cols-4">
+                        {promptShowcase.map((item, index) => (
+                            <button
+                                key={item.id}
+                                type="button"
+                                onClick={() => {
+                                    setPreviewIndex(index);
+                                    setPreviewOpen(true);
+                                }}
+                                className={cn(
+                                    "group relative cursor-pointer overflow-hidden rounded-lg border border-white/60 bg-white/70 text-left shadow-sm shadow-stone-200/60 dark:border-white/10 dark:bg-white/5 dark:shadow-black/20",
+                                    index === 0 && "md:col-span-2 md:row-span-2",
+                                    index === 3 && "md:col-span-2",
+                                )}
+                            >
+                                <img src={item.coverUrl} alt={item.title} className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]" loading="lazy" referrerPolicy="no-referrer" />
+                                <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 via-black/35 to-transparent p-4 text-white">
+                                    <div className="mb-2 flex flex-wrap gap-1.5">
+                                        {item.tags.slice(0, 2).map((tag) => (
+                                            <Tag key={tag} variant="filled" className="m-0 bg-white/15 text-[11px] text-white backdrop-blur">
+                                                {tag}
+                                            </Tag>
+                                        ))}
+                                    </div>
+                                    <h3 className="text-sm font-medium">{item.title}</h3>
+                                    <p className="mt-1 line-clamp-2 text-xs leading-5 text-white/75">{item.prompt}</p>
                                 </div>
-                                <h3 className="text-sm font-medium">{item.title}</h3>
-                                <p className="mt-1 line-clamp-2 text-xs leading-5 text-white/75">{item.prompt}</p>
-                            </div>
-                        </button>
-                    ))}
+                            </button>
+                        ))}
+                    </div>
                 </div>
             </section>
 
@@ -247,19 +259,19 @@ export default function HomePage() {
                 </div>
             </Image.PreviewGroup>
 
-            <Modal open={authOpen} footer={null} width={760} centered destroyOnHidden onCancel={() => setAuthOpen(false)} className="landing-auth-modal">
+            <Modal open={authOpen} footer={null} width={820} centered destroyOnHidden onCancel={() => setAuthOpen(false)} className="landing-auth-modal">
                 <div className="landing-auth-modal-shell">
                     <section className="landing-auth-modal-brand">
-                        <div className="inline-flex items-center gap-3 text-white">
-                            <SiteLogo logoUrl={site.logoUrl} className="size-10" />
-                            <span className="text-xl font-semibold">{site.title || "VOZEB"}</span>
+                        <div className="inline-flex items-center gap-3 text-stone-950 dark:text-white">
+                            <SiteLogo logoUrl={site.logoUrl} className="landing-auth-brand-logo bg-stone-950 dark:bg-white" />
+                            <span className="text-2xl font-semibold">{site.title || "VOZEB"}</span>
                         </div>
-                        <div>
-                            <p className="text-sm font-medium text-cyan-200">Creator Access</p>
-                            <h2 className="mt-3 text-3xl font-semibold leading-tight text-white">进入你的 AI 创作工作台</h2>
-                            <p className="mt-4 text-sm leading-7 text-stone-300">登录后继续管理画布、素材、模型和提示词资产。</p>
+                        <div className="landing-auth-modal-copy">
+                            <p className="text-sm font-medium text-cyan-700 dark:text-cyan-200">VOZEB Access</p>
+                            <h2 className="mt-3 text-3xl font-semibold leading-tight text-stone-950 dark:text-white">继续你的创作现场</h2>
+                            <p className="mt-4 text-sm leading-7 text-stone-500 dark:text-stone-300">登录后进入画布、素材、模型和提示词库。</p>
                         </div>
-                        <div className="grid gap-2 text-sm text-stone-300">
+                        <div className="landing-auth-modal-bullets grid gap-2 text-sm text-stone-600 dark:text-stone-300">
                             {["无限画布编排", "远程提示词库", "用户额度与后台"].map((item) => (
                                 <div key={item} className="flex items-center gap-2">
                                     <span className="size-1.5 rounded-full bg-cyan-300" />
@@ -281,7 +293,7 @@ function SiteLogo({ logoUrl, className }: { logoUrl: string; className: string }
     if (logoUrl && logoUrl !== "/logo.svg") return <img src={logoUrl} alt="" className={cn(className, "shrink-0 object-contain")} />;
     return (
         <span
-            className={cn(className, "shrink-0 bg-white")}
+            className={cn(className, "shrink-0")}
             style={{
                 mask: "url(/logo.svg) center / contain no-repeat",
                 WebkitMask: "url(/logo.svg) center / contain no-repeat",

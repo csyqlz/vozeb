@@ -5,6 +5,7 @@ import { create } from "zustand";
 export type LocalUser = {
     id: string;
     username: string;
+    email?: string;
     displayName: string;
     avatarUrl?: string;
     role: "admin" | "user";

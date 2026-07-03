@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { App, Button, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Table, Tag } from "antd";
 import type { TableColumnsType } from "antd";
-import { Database, Download, Gift, Globe2, Image as ImageIcon, KeyRound, PlugZap, Plus, RefreshCw, Save, Search, ShieldCheck, SlidersHorizontal, Trash2, UserCog, UserRound, UsersRound } from "lucide-react";
+import { Database, Download, Gift, Globe2, Image as ImageIcon, KeyRound, Mail, PlugZap, Plus, RefreshCw, Save, Search, Send, ShieldCheck, SlidersHorizontal, Trash2, UserCog, UserRound, UsersRound } from "lucide-react";
 
 import type { AuthSettings, PublicUser, SystemModelChannel, UserQuota, UserRole, UserStatus } from "@/lib/auth/store";
 import type { Prompt } from "@/services/api/prompts";
@@ -26,6 +26,9 @@ type PromptFormValue = {
 };
 
 type UserEditorValue = {
+    displayName: string;
+    email?: string;
+    password?: string;
     role: UserRole;
     status: UserStatus;
     quota: UserQuota;
@@ -44,6 +47,8 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
     const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
     const [settingsLoading, setSettingsLoading] = useState(false);
     const [backupLoading, setBackupLoading] = useState(false);
+    const [mailTestLoading, setMailTestLoading] = useState(false);
+    const [mailTestTo, setMailTestTo] = useState("");
     const [fetchingModelId, setFetchingModelId] = useState("");
     const [promptSaving, setPromptSaving] = useState(false);
     const [promptsLoading, setPromptsLoading] = useState(false);
@@ -118,7 +123,7 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
         }
     };
 
-    const updateUser = async (userId: string, patch: Partial<Pick<PublicUser, "role" | "status" | "quota">>) => {
+    const updateUser = async (userId: string, patch: Partial<Pick<PublicUser, "displayName" | "email" | "role" | "status" | "quota">> & { password?: string }) => {
         setUpdatingUserId(userId);
         try {
             const response = await fetch(`/api/admin/users/${userId}`, {
@@ -134,6 +139,21 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
         } catch (error) {
             message.error(error instanceof Error ? error.message : "更新用户失败");
             return null;
+        } finally {
+            setUpdatingUserId(null);
+        }
+    };
+
+    const deleteUser = async (userId: string) => {
+        setUpdatingUserId(userId);
+        try {
+            const response = await fetch(`/api/admin/users/${userId}`, { method: "DELETE" });
+            const payload = (await response.json()) as { error?: string };
+            if (!response.ok) throw new Error(payload.error || "删除用户失败");
+            setUsers((items) => items.filter((item) => item.id !== userId));
+            message.success("用户已删除");
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "删除用户失败");
         } finally {
             setUpdatingUserId(null);
         }
@@ -215,6 +235,28 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
         setSettings((current) => ({ ...current, checkInReward: { ...current.checkInReward, [key]: Number(value) || 0 } }));
     };
 
+    const updateMailSetting = (key: keyof AuthSettings["mail"], value: string | number | boolean) => {
+        setSettings((current) => ({ ...current, mail: { ...current.mail, [key]: value } }));
+    };
+
+    const testMailSettings = async () => {
+        setMailTestLoading(true);
+        try {
+            const response = await fetch("/api/admin/mail/test", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ mail: settings.mail, to: mailTestTo }),
+            });
+            const payload = (await response.json()) as { error?: string };
+            if (!response.ok) throw new Error(payload.error || "测试邮件发送失败");
+            message.success("测试邮件已发送，请检查收件箱");
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "测试邮件发送失败");
+        } finally {
+            setMailTestLoading(false);
+        }
+    };
+
     const updateSiteSetting = (key: keyof AuthSettings["site"], value: string) => {
         setSettings((current) => ({ ...current, site: { ...current.site, [key]: value } }));
     };
@@ -260,7 +302,7 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
 
     const openUserEditor = (user: PublicUser) => {
         setEditingUser(user);
-        userForm.setFieldsValue({ role: user.role, status: user.status, quota: user.quota });
+        userForm.setFieldsValue({ displayName: user.displayName, email: user.email || "", password: "", role: user.role, status: user.status, quota: user.quota });
     };
 
     const closeUserEditor = () => {
@@ -271,6 +313,9 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
     const saveUserEditor = async (value: UserEditorValue) => {
         if (!editingUser) return;
         const user = await updateUser(editingUser.id, {
+            displayName: value.displayName,
+            email: value.email || "",
+            password: value.password || undefined,
             role: value.role,
             status: value.status,
             quota: normalizeQuotaFormValue(value.quota, editingUser.quota),
@@ -289,6 +334,7 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                         <span className="truncate">{record.displayName}</span>
                     </div>
                     <div className="mt-1 text-xs text-stone-500">@{record.username}</div>
+                    <div className="mt-0.5 truncate text-xs text-stone-400">{record.email || "未绑定邮箱"}</div>
                 </div>
             ),
         },
@@ -312,11 +358,16 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
         },
         {
             title: "操作",
-            width: 120,
+            width: 150,
             render: (_, record) => (
-                <Button size="small" icon={<SlidersHorizontal className="size-3.5" />} loading={updatingUserId === record.id} onClick={() => openUserEditor(record)}>
-                    管理
-                </Button>
+                <Space size={6}>
+                    <Button size="small" icon={<SlidersHorizontal className="size-3.5" />} loading={updatingUserId === record.id} onClick={() => openUserEditor(record)}>
+                        管理
+                    </Button>
+                    <Popconfirm title="删除该用户？" description="会同时清理该用户会话、签到和额度记录。" okText="删除" cancelText="取消" onConfirm={() => void deleteUser(record.id)}>
+                        <Button size="small" danger disabled={record.id === currentUser.id} loading={updatingUserId === record.id} icon={<Trash2 className="size-3.5" />} />
+                    </Popconfirm>
+                </Space>
             ),
         },
     ];
@@ -442,17 +493,17 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                             <div className="space-y-4">
                                 <div className="rounded-lg border border-stone-200 bg-white p-4 shadow-sm shadow-stone-200/40 dark:border-stone-800 dark:bg-stone-950 dark:shadow-black/20">
                                     <SectionTitle icon={<ImageIcon className="size-4" />} title="前台预览" />
-                                    <div className="mt-5 rounded-lg bg-stone-950 p-5 text-white">
+                                    <div className="mt-5 rounded-lg border border-stone-200 bg-white p-5 text-stone-950 shadow-sm shadow-stone-200/60 dark:border-white/10 dark:bg-stone-950 dark:text-white dark:shadow-black/20">
                                         <div className="flex items-center gap-3">
                                             <SiteLogoPreview logoUrl={settings.site.logoUrl} />
                                             <div className="min-w-0">
                                                 <div className="truncate text-lg font-semibold">{settings.site.title || "VOZEB"}</div>
-                                                <div className="mt-1 text-xs text-stone-400">首页导航品牌</div>
+                                                <div className="mt-1 text-xs text-stone-500 dark:text-stone-400">首页导航品牌</div>
                                             </div>
                                         </div>
-                                        <div className="mt-6 border-t border-white/10 pt-4">
+                                        <div className="mt-6 border-t border-stone-200 pt-4 dark:border-white/10">
                                             <div className="text-base font-semibold">{settings.site.seoTitle || settings.site.title}</div>
-                                            <p className="mt-2 line-clamp-3 text-sm leading-6 text-stone-400">{settings.site.seoDescription}</p>
+                                            <p className="mt-2 line-clamp-3 text-sm leading-6 text-stone-500 dark:text-stone-400">{settings.site.seoDescription}</p>
                                         </div>
                                     </div>
                                 </div>
@@ -480,10 +531,10 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                             }
                         />
                         <div className="space-y-5 p-4 sm:p-5">
-                            <div className="grid gap-4 xl:grid-cols-[minmax(260px,0.66fr)_minmax(0,1.34fr)]">
-                                <div className="rounded-lg border border-stone-200 bg-stone-50/70 p-4 dark:border-stone-800 dark:bg-stone-900/40">
+                            <div className="grid gap-4 xl:grid-cols-[minmax(320px,0.82fr)_minmax(0,1.18fr)]">
+                                <div className="space-y-4 rounded-lg border border-stone-200 bg-stone-50/70 p-4 dark:border-stone-800 dark:bg-stone-900/40">
                                     <SectionTitle icon={<UserCog className="size-4" />} title="账号策略" />
-                                    <div className="mt-4 space-y-4">
+                                    <div className="space-y-4">
                                         <SettingToggle
                                             title="开放注册"
                                             description="关闭后，新账号不能自助注册。"
@@ -492,6 +543,58 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                                             unCheckedChildren="关闭"
                                             onChange={(registrationEnabled) => setSettings((current) => ({ ...current, registrationEnabled }))}
                                         />
+                                        <SettingToggle
+                                            title="邮箱注册"
+                                            description="开启后，注册页必须填写邮箱；邮箱唯一，不允许重复注册。"
+                                            checked={settings.emailRegistrationEnabled}
+                                            checkedChildren="开启"
+                                            unCheckedChildren="关闭"
+                                            onChange={(emailRegistrationEnabled) => setSettings((current) => ({ ...current, emailRegistrationEnabled }))}
+                                        />
+                                    </div>
+                                    <div className="border-t border-stone-200 pt-4 dark:border-stone-800">
+                                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                            <SectionTitle icon={<Mail className="size-4" />} title="邮箱服务" />
+                                            <Button loading={mailTestLoading} icon={<Send className="size-4" />} onClick={() => void testMailSettings()}>
+                                                测试邮箱
+                                            </Button>
+                                        </div>
+                                        <div className="mt-4 grid gap-3">
+                                            <div className="grid gap-3 sm:grid-cols-2">
+                                                <LabeledControl label="邮箱类型">
+                                                    <Input value={settings.mail.provider} placeholder="QQ 邮箱" onChange={(event) => updateMailSetting("provider", event.target.value)} />
+                                                </LabeledControl>
+                                                <LabeledControl label="SMTP 服务器">
+                                                    <Input value={settings.mail.host} placeholder="smtp.qq.com" onChange={(event) => updateMailSetting("host", event.target.value)} />
+                                                </LabeledControl>
+                                            </div>
+                                            <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+                                                <LabeledControl label="端口">
+                                                    <InputNumber className="w-full" min={1} max={65535} precision={0} value={settings.mail.port} onChange={(value) => updateMailSetting("port", Number(value) || 465)} />
+                                                </LabeledControl>
+                                                <SettingInlineToggle title="SSL" checked={settings.mail.secure} checkedChildren="开启" unCheckedChildren="关闭" onChange={(secure) => updateMailSetting("secure", secure)} />
+                                            </div>
+                                            <LabeledControl label="邮箱账号">
+                                                <Input value={settings.mail.username} placeholder="name@qq.com" onChange={(event) => updateMailSetting("username", event.target.value)} />
+                                            </LabeledControl>
+                                            <LabeledControl label="授权码 / 密码">
+                                                <Input.Password value={settings.mail.password} placeholder="QQ 邮箱请填写 SMTP 授权码" onChange={(event) => updateMailSetting("password", event.target.value)} />
+                                            </LabeledControl>
+                                            <div className="grid gap-3 sm:grid-cols-2">
+                                                <LabeledControl label="发件邮箱">
+                                                    <Input value={settings.mail.fromEmail} placeholder="默认使用邮箱账号" onChange={(event) => updateMailSetting("fromEmail", event.target.value)} />
+                                                </LabeledControl>
+                                                <LabeledControl label="发件名称">
+                                                    <Input value={settings.mail.fromName} placeholder="VOZEB" onChange={(event) => updateMailSetting("fromName", event.target.value)} />
+                                                </LabeledControl>
+                                            </div>
+                                            <LabeledControl label="测试收件邮箱">
+                                                <Input value={mailTestTo} placeholder="留空则发送到发件邮箱" onChange={(event) => setMailTestTo(event.target.value)} />
+                                            </LabeledControl>
+                                            <div className="rounded-md border border-cyan-200/70 bg-cyan-50 px-3 py-2 text-xs leading-5 text-cyan-900 dark:border-cyan-900/50 dark:bg-cyan-950/30 dark:text-cyan-100">
+                                                QQ、网易、企业邮箱都可填写对应 SMTP；QQ 默认 `smtp.qq.com:465 SSL`，密码通常使用邮箱授权码。
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                                 <QuotaRuleTable defaultQuota={settings.defaultQuota} checkInReward={settings.checkInReward} onDefaultQuotaChange={updateDefaultQuota} onCheckInRewardChange={updateCheckInReward} />
@@ -501,9 +604,20 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                                     type="primary"
                                     loading={settingsLoading}
                                     icon={<Save className="size-4" />}
-                                    onClick={() => saveSettings({ registrationEnabled: settings.registrationEnabled, defaultQuota: settings.defaultQuota, checkInReward: settings.checkInReward }, "账号与额度设置已保存")}
+                                    onClick={() =>
+                                        saveSettings(
+                                            {
+                                                registrationEnabled: settings.registrationEnabled,
+                                                emailRegistrationEnabled: settings.emailRegistrationEnabled,
+                                                mail: settings.mail,
+                                                defaultQuota: settings.defaultQuota,
+                                                checkInReward: settings.checkInReward,
+                                            },
+                                            "账号、邮箱与额度设置已保存",
+                                        )
+                                    }
                                 >
-                                    保存账号与额度
+                                    保存账号、邮箱与额度
                                 </Button>
                             </div>
 
@@ -585,27 +699,36 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                 {activeSection === "prompts" ? (
                     <Panel>
                         <PanelHeader title="公共提示词库" description="这里新增的提示词会出现在用户端“提示词库”；旧的外部仓库提示词已不再加载。" />
-                        <div className="grid gap-5 p-4 lg:grid-cols-[400px_minmax(0,1fr)] sm:p-5">
-                            <Form className="rounded-lg border border-stone-200 bg-stone-50/70 p-4 dark:border-stone-800 dark:bg-stone-900/40" form={promptForm} layout="vertical" requiredMark={false} onFinish={createPrompt}>
-                                <Form.Item label="标题" name="title" rules={[{ required: true, message: "请输入标题" }]}>
-                                    <Input />
-                                </Form.Item>
-                                <Form.Item label="分类" name="category">
-                                    <Input placeholder="例如：商业海报" />
-                                </Form.Item>
+                        <div className="grid gap-5 p-4 xl:grid-cols-[430px_minmax(0,1fr)] sm:p-5">
+                            <Form className="admin-prompt-form rounded-xl p-4" form={promptForm} layout="vertical" requiredMark={false} onFinish={createPrompt}>
+                                <div className="admin-prompt-note mb-5 rounded-lg p-3">
+                                    <div className="flex items-center gap-2 text-sm font-semibold text-stone-950 dark:text-stone-100">
+                                        <Plus className="size-4 text-cyan-600 dark:text-cyan-300" />
+                                        新增公共提示词
+                                    </div>
+                                    <p className="mt-1 text-xs leading-5 text-stone-600 dark:text-stone-400">建议填写远程图片封面 URL，用户端会直接显示封面，不走本地素材存储。</p>
+                                </div>
+                                <div className="grid gap-3 sm:grid-cols-2">
+                                    <Form.Item label="提示词标题" name="title" rules={[{ required: true, message: "请输入标题" }]}>
+                                        <Input placeholder="例如：赛博城市海报" />
+                                    </Form.Item>
+                                    <Form.Item label="分类" name="category">
+                                        <Input placeholder="商业海报 / 人像 / 产品" />
+                                    </Form.Item>
+                                </div>
                                 <Form.Item label="标签" name="tags">
-                                    <Input placeholder="用逗号分隔" />
+                                    <Input placeholder="用逗号分隔，例如：霓虹, 海报, 科幻" />
                                 </Form.Item>
                                 <Form.Item label="封面 URL" name="coverUrl">
-                                    <Input placeholder="可选" />
+                                    <Input placeholder="https://example.com/image.png" />
                                 </Form.Item>
                                 <Form.Item label="提示词内容" name="prompt" rules={[{ required: true, message: "请输入提示词内容" }]}>
-                                    <Input.TextArea rows={5} />
+                                    <Input.TextArea rows={7} placeholder="写入可直接用于生成的完整提示词，支持中英文描述。" />
                                 </Form.Item>
-                                <Form.Item label="备注 / 预览" name="preview">
-                                    <Input.TextArea rows={2} />
+                                <Form.Item label="备注 / 预览说明" name="preview">
+                                    <Input.TextArea rows={3} placeholder="可补充适用场景、参数建议或出图效果。" />
                                 </Form.Item>
-                                <Button type="primary" htmlType="submit" loading={promptSaving} icon={<Plus className="size-4" />}>
+                                <Button className="w-full sm:w-auto" type="primary" htmlType="submit" loading={promptSaving} icon={<Plus className="size-4" />}>
                                     插入公共提示词
                                 </Button>
                             </Form>
@@ -625,6 +748,17 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                 onCancel={closeUserEditor}
             >
                 <Form form={userForm} layout="vertical" requiredMark={false} onFinish={saveUserEditor}>
+                    <div className="grid gap-4 md:grid-cols-2">
+                        <Form.Item label="显示昵称" name="displayName" rules={[{ required: true, message: "请输入显示昵称" }]}>
+                            <Input placeholder="显示在顶部账号菜单" />
+                        </Form.Item>
+                        <Form.Item label="绑定邮箱" name="email">
+                            <Input placeholder="可留空" />
+                        </Form.Item>
+                    </div>
+                    <Form.Item label="重置密码" name="password" extra="留空则不修改密码；填写后该用户需要重新登录。">
+                        <Input.Password placeholder="至少 8 位" />
+                    </Form.Item>
                     <div className="grid gap-4 md:grid-cols-2">
                         <Form.Item label="角色" name="role" rules={[{ required: true, message: "请选择角色" }]}>
                             <Select
@@ -855,10 +989,10 @@ function QuotaSummary({ quota }: { quota: UserQuota }) {
 }
 
 function SiteLogoPreview({ logoUrl }: { logoUrl: string }) {
-    if (logoUrl) return <img src={logoUrl} alt="" className="size-12 rounded-md bg-white/10 object-contain p-1" referrerPolicy="no-referrer" />;
+    if (logoUrl) return <img src={logoUrl} alt="" className="size-12 rounded-md bg-stone-100 object-contain p-1 dark:bg-white/10" referrerPolicy="no-referrer" />;
     return (
         <span
-            className="size-12 rounded-md bg-white"
+            className="size-12 rounded-md bg-stone-950 dark:bg-white"
             style={{
                 mask: "url(/logo.svg) center / 78% no-repeat",
                 WebkitMask: "url(/logo.svg) center / 78% no-repeat",

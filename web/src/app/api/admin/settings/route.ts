@@ -24,6 +24,8 @@ export async function PATCH(request: Request) {
         const patch: Partial<AuthSettings> = {};
         if (body.site) patch.site = body.site;
         if (typeof body.registrationEnabled === "boolean") patch.registrationEnabled = body.registrationEnabled;
+        if (typeof body.emailRegistrationEnabled === "boolean") patch.emailRegistrationEnabled = body.emailRegistrationEnabled;
+        if (body.mail) patch.mail = body.mail;
         if (typeof body.allowUserApiConfig === "boolean") patch.allowUserApiConfig = body.allowUserApiConfig;
         if (body.defaultQuota) patch.defaultQuota = body.defaultQuota;
         if (body.checkInReward) patch.checkInReward = body.checkInReward;

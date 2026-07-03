@@ -46,12 +46,22 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const canvasTheme = canvasThemes[theme];
     const showAdminMetaActions = user?.role === "admin";
-    const naturalIconClass = "inline-flex size-7 shrink-0 items-center justify-center text-stone-600 transition hover:text-stone-950 dark:text-stone-300 dark:hover:text-white [&_svg]:size-4";
+    const naturalIconClass =
+        "inline-flex size-8 shrink-0 items-center justify-center rounded-md text-stone-600 transition hover:bg-stone-100 hover:text-stone-950 sm:size-7 sm:hover:bg-transparent dark:text-stone-300 dark:hover:bg-stone-800 dark:hover:text-white sm:dark:hover:bg-transparent [&_svg]:size-4";
     const iconStyle: CSSProperties | undefined = variant === "canvas" ? { color: canvasTheme.node.text } : undefined;
     const versionStyle = iconStyle;
     const gitHubClassName = "size-7 text-base";
     const gitHubStyle = iconStyle;
     const accountItems: MenuProps["items"] = [
+        {
+            key: "profile",
+            icon: <UserCircle className="size-4" />,
+            label: (
+                <Link href="/profile" prefetch onMouseEnter={() => router.prefetch("/profile")} onFocus={() => router.prefetch("/profile")}>
+                    个人资料
+                </Link>
+            ),
+        },
         ...(user?.role === "admin"
             ? [
                   {
@@ -138,13 +148,13 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
                     <Dropdown menu={{ items: accountItems, onClick: handleMenuClick }} trigger={["click"]} placement="bottomRight">
                         <button
                             type="button"
-                            className="ml-1 inline-flex h-8 max-w-40 items-center gap-2 rounded-md border border-stone-200 px-2.5 text-sm font-medium text-stone-700 transition hover:border-stone-300 hover:text-stone-950 dark:border-stone-800 dark:text-stone-200 dark:hover:border-stone-700 dark:hover:text-white"
+                            className="ml-1 inline-flex h-8 max-w-[36px] items-center gap-2 rounded-md border border-stone-200 px-2.5 text-sm font-medium text-stone-700 transition hover:border-stone-300 hover:text-stone-950 sm:max-w-40 dark:border-stone-800 dark:text-stone-200 dark:hover:border-stone-700 dark:hover:text-white"
                             style={iconStyle}
                             aria-label="账户菜单"
                             title="账户菜单"
                         >
                             <UserCircle className="size-4 shrink-0" />
-                            <span className="truncate">{user.displayName || user.username}</span>
+                            <span className="hidden truncate sm:inline">{user.displayName || user.username}</span>
                         </button>
                     </Dropdown>
                 </>
@@ -155,7 +165,7 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
                     style={iconStyle}
                 >
                     <UserCircle className="size-4" />
-                    登录
+                    <span className="hidden sm:inline">登录</span>
                 </Link>
             )}
             {onOpenShortcuts ? (

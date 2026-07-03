@@ -42,7 +42,7 @@ http://localhost:3000
 docker compose -f docker-compose.local.yml up -d --build
 ```
 
-2 核 2G 服务器建议优先使用发布镜像；如必须本地构建，请使用支持 BuildKit 的 Docker 版本，构建缓存会复用依赖和 `.next/cache`。主应用 Dockerfile 默认设置 `NEXT_BUILD_CPUS=1`，会降低 Next.js 构建时的 worker 数，减少低配服务器 CPU 和内存峰值。
+0.5G 到 2G 内存的小服务器建议优先使用发布镜像；服务器只拉取并启动容器，不现场执行 `next build`。如果必须本地构建，请至少准备 2G 内存、启用 BuildKit 缓存，并保留 `NEXT_BUILD_CPUS=1`，这样可以降低 Next.js 构建时的 worker 数和资源峰值。
 
 ## 为什么低配服务器构建会拉满 CPU
 
@@ -52,8 +52,8 @@ docker compose -f docker-compose.local.yml up -d --build
 
 建议顺序：
 
-1. 生产环境优先使用 `ghcr.io/csyqlz/vozeb:latest` 发布镜像，服务器只拉取和启动，不现场构建。
-2. 必须本地构建时保留 `NEXT_BUILD_CPUS=1`，并开启 BuildKit 缓存。
+1. 0.5G 服务器使用 `ghcr.io/csyqlz/vozeb:latest` 发布镜像，服务器只拉取和启动，不现场构建，才适合 2 分钟级部署。
+2. 必须本地构建时保留 `NEXT_BUILD_CPUS=1`，并开启 BuildKit 缓存；建议至少 2G 内存。
 3. 如果仍然卡死，在本机或 CI 构建镜像后推送到镜像仓库，再让服务器拉取。
 
 ## 更新镜像

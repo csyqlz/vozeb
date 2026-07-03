@@ -4,7 +4,7 @@ import type { FormEvent, ReactNode } from "react";
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowRight, LockKeyhole, UserRound } from "lucide-react";
+import { ArrowLeft, ArrowRight, LockKeyhole, Mail, UserRound } from "lucide-react";
 import { App, Button, Input } from "antd";
 
 import { type LocalUser, useUserStore } from "@/stores/use-user-store";
@@ -14,20 +14,24 @@ type AuthFormProps = {
     mode: "login" | "register";
     nextPath?: string;
     registrationEnabled?: boolean;
+    emailRegistrationEnabled?: boolean;
     firstUser?: boolean;
     variant?: "page" | "embedded";
     className?: string;
     headerSlot?: ReactNode;
 };
 
-export function AuthForm({ mode, nextPath = "/canvas", registrationEnabled = true, firstUser = false, variant = "page", className, headerSlot }: AuthFormProps) {
+export function AuthForm({ mode, nextPath = "/canvas", registrationEnabled = true, emailRegistrationEnabled = false, firstUser = false, variant = "page", className, headerSlot }: AuthFormProps) {
     const router = useRouter();
     const { message } = App.useApp();
     const setUser = useUserStore((state) => state.setUser);
     const [username, setUsername] = useState("");
+    const [email, setEmail] = useState("");
+    const [emailCode, setEmailCode] = useState("");
     const [displayName, setDisplayName] = useState("");
     const [password, setPassword] = useState("");
     const [submitting, setSubmitting] = useState(false);
+    const [sendingCode, setSendingCode] = useState(false);
     const isRegister = mode === "register";
     const disabled = isRegister && !registrationEnabled;
 
@@ -39,7 +43,7 @@ export function AuthForm({ mode, nextPath = "/canvas", registrationEnabled = tru
             const response = await fetch(isRegister ? "/api/auth/register" : "/api/auth/login", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ username, displayName, password }),
+                body: JSON.stringify({ username, email, emailCode, displayName, password }),
             });
             const payload = (await response.json()) as { user?: LocalUser; error?: string };
             if (!response.ok || !payload.user) throw new Error(payload.error || (isRegister ? "注册失败" : "登录失败"));
@@ -54,20 +58,38 @@ export function AuthForm({ mode, nextPath = "/canvas", registrationEnabled = tru
         }
     };
 
+    const sendEmailCode = async () => {
+        setSendingCode(true);
+        try {
+            const response = await fetch("/api/auth/email-code", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ purpose: "register", email }),
+            });
+            const payload = (await response.json()) as { error?: string };
+            if (!response.ok) throw new Error(payload.error || "验证码发送失败");
+            message.success("验证码已发送，请查看邮箱");
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "验证码发送失败");
+        } finally {
+            setSendingCode(false);
+        }
+    };
+
     const form = (
         <section className={cn("auth-panel flex min-h-full items-center", variant === "embedded" ? "p-6 sm:p-7" : "p-8 sm:p-10", className)}>
-            <form onSubmit={submit} className="w-full space-y-5">
+            <form onSubmit={submit} className="auth-form-body w-full space-y-6">
                 {headerSlot}
-                <div>
-                    <p className="text-sm font-medium text-cyan-300">{firstUser ? "首次设置" : isRegister ? "创建账号" : "账号访问"}</p>
-                    <h2 className={cn("mt-2 font-semibold tracking-normal text-white", variant === "embedded" ? "text-2xl" : "text-3xl")}>{firstUser ? "创建第一个管理员账号" : isRegister ? "注册后进入 VOZEB" : "登录进入 VOZEB"}</h2>
-                    <p className="mt-3 text-sm leading-6 text-stone-400">{isRegister ? "用户名支持字母、数字、下划线、点和短横线。" : "输入账号后直接进入画布、素材、模型和提示词工作流。"}</p>
+                <div className="auth-form-header">
+                    <p className="auth-form-kicker text-sm font-medium text-cyan-600 dark:text-cyan-300">{firstUser ? "首次设置" : isRegister ? "创建账号" : "账号访问"}</p>
+                    <h2 className={cn("mt-2 font-semibold tracking-normal text-stone-950 dark:text-white", variant === "embedded" ? "text-2xl" : "text-3xl")}>{firstUser ? "创建第一个管理员账号" : isRegister ? "注册后进入 VOZEB" : "登录进入 VOZEB"}</h2>
+                    <p className="auth-form-description mt-3 text-sm leading-6 text-stone-500 dark:text-stone-400">{isRegister ? "创建账号后即可进入 VOZEB。" : "登录后继续你的画布、素材和提示词工作流。"}</p>
                 </div>
 
-                {disabled ? <div className="rounded-md border border-cyan-300/20 bg-cyan-300/8 px-4 py-3 text-sm text-cyan-50">当前站点已关闭注册，请联系管理员开通账号。</div> : null}
+                {disabled ? <div className="rounded-md border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm text-cyan-900 dark:border-cyan-300/20 dark:bg-cyan-300/8 dark:text-cyan-50">当前站点已关闭注册，请联系管理员开通账号。</div> : null}
 
                 <label className="block space-y-2">
-                    <span className="text-sm font-medium text-stone-200">用户名</span>
+                    <span className="text-sm font-medium text-stone-700 dark:text-stone-200">用户名</span>
                     <Input
                         size="large"
                         prefix={<UserRound className="size-4 text-stone-500" />}
@@ -80,15 +102,48 @@ export function AuthForm({ mode, nextPath = "/canvas", registrationEnabled = tru
                     />
                 </label>
 
+                {isRegister && emailRegistrationEnabled ? (
+                    <div className="space-y-3">
+                        <label className="block space-y-2">
+                            <span className="text-sm font-medium text-stone-700 dark:text-stone-200">邮箱</span>
+                            <Input
+                                size="large"
+                                prefix={<Mail className="size-4 text-stone-500" />}
+                                value={email}
+                                onChange={(event) => setEmail(event.target.value)}
+                                placeholder="name@qq.com"
+                                autoComplete="email"
+                                type="email"
+                                disabled={submitting || disabled}
+                                required
+                            />
+                        </label>
+                        <label className="block space-y-2">
+                            <span className="text-sm font-medium text-stone-700 dark:text-stone-200">邮箱验证码</span>
+                            <Input.Search
+                                size="large"
+                                value={emailCode}
+                                onChange={(event) => setEmailCode(event.target.value)}
+                                placeholder="6 位验证码"
+                                enterButton={sendingCode ? "发送中" : "获取验证码"}
+                                loading={sendingCode}
+                                disabled={submitting || disabled}
+                                onSearch={() => void sendEmailCode()}
+                                required
+                            />
+                        </label>
+                    </div>
+                ) : null}
+
                 {isRegister ? (
                     <label className="block space-y-2">
-                        <span className="text-sm font-medium text-stone-200">显示名称</span>
+                        <span className="text-sm font-medium text-stone-700 dark:text-stone-200">显示名称</span>
                         <Input size="large" value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="用于顶部账号菜单" autoComplete="name" disabled={submitting || disabled} />
                     </label>
                 ) : null}
 
                 <label className="block space-y-2">
-                    <span className="text-sm font-medium text-stone-200">密码</span>
+                    <span className="text-sm font-medium text-stone-700 dark:text-stone-200">密码</span>
                     <Input.Password
                         size="large"
                         prefix={<LockKeyhole className="size-4 text-stone-500" />}
@@ -101,23 +156,27 @@ export function AuthForm({ mode, nextPath = "/canvas", registrationEnabled = tru
                     />
                 </label>
 
-                <Button type="primary" htmlType="submit" size="large" block loading={submitting} disabled={disabled} icon={<ArrowRight className="size-4" />} iconPlacement="end">
+                <Button className="auth-submit-button" type="primary" htmlType="submit" size="large" block loading={submitting} disabled={disabled} icon={<ArrowRight className="size-4" />} iconPlacement="end">
                     {isRegister ? "注册并进入" : "登录"}
                 </Button>
 
-                <div className="pt-2 text-center text-sm text-stone-400">
+                <div className="auth-switch-link pt-2 text-center text-sm text-stone-500 dark:text-stone-400">
                     {isRegister ? (
                         <>
                             已有账号？{" "}
-                            <Link href="/login" className="font-medium text-white hover:underline">
+                            <Link href="/login" className="font-medium text-stone-950 hover:underline dark:text-white">
                                 去登录
                             </Link>
                         </>
                     ) : (
                         <>
                             没有账号？{" "}
-                            <Link href="/register" className="font-medium text-white hover:underline">
+                            <Link href="/register" className="font-medium text-stone-950 hover:underline dark:text-white">
                                 去注册
+                            </Link>
+                            <span className="mx-2 text-stone-300 dark:text-stone-700">/</span>
+                            <Link href="/forgot-password" className="font-medium text-stone-950 hover:underline dark:text-white">
+                                忘记密码
                             </Link>
                         </>
                     )}
@@ -129,24 +188,40 @@ export function AuthForm({ mode, nextPath = "/canvas", registrationEnabled = tru
     if (variant === "embedded") return form;
 
     return (
-        <main className="auth-page-bg flex min-h-dvh items-center justify-center px-6 py-10 text-foreground">
-            <div className="grid w-full max-w-5xl overflow-hidden border border-white/10 bg-black/50 shadow-2xl shadow-cyan-950/20 backdrop-blur md:grid-cols-[0.9fr_1fr]">
-                <section className="flex min-h-[360px] flex-col justify-between border-b border-white/10 p-8 text-white md:border-b-0 md:border-r">
-                    <Link href="/" className="inline-flex items-center gap-2 text-sm font-semibold">
-                        <span
-                            className="size-8 bg-cyan-300"
-                            style={{
-                                mask: "url(/logo.svg) center / contain no-repeat",
-                                WebkitMask: "url(/logo.svg) center / contain no-repeat",
-                            }}
-                        />
-                        VOZEB
-                    </Link>
-                    <div>
-                        <p className="text-sm text-cyan-200/70">{firstUser ? "首次设置" : isRegister ? "创建账号" : "账号访问"}</p>
-                        <h1 className="mt-3 text-balance text-3xl font-semibold tracking-normal">{firstUser ? "创建第一个管理员账号" : isRegister ? "注册后进入 VOZEB 工作台" : "登录继续你的 VOZEB 创作"}</h1>
+        <main className="auth-page-bg flex h-dvh items-center justify-center overflow-y-auto px-4 py-6 text-foreground sm:px-6 sm:py-10">
+            <div className="auth-page-card grid w-full max-w-5xl overflow-hidden border border-stone-200 bg-white/86 shadow-2xl shadow-cyan-950/10 backdrop-blur md:grid-cols-[0.9fr_1fr] dark:border-white/10 dark:bg-black/50 dark:shadow-cyan-950/20">
+                <section className="auth-page-brand-panel flex min-h-[220px] flex-col justify-between gap-5 border-b border-stone-200 p-5 text-stone-950 sm:min-h-[360px] sm:gap-8 sm:p-8 md:border-b-0 md:border-r dark:border-white/10 dark:text-white">
+                    <div className="flex items-start justify-between gap-4">
+                        <Link href="/" className="inline-flex items-center gap-4 text-base font-semibold">
+                            <span
+                                className="size-16 bg-stone-950 sm:size-20 dark:bg-cyan-200"
+                                style={{
+                                    mask: "url(/logo.svg) center / contain no-repeat",
+                                    WebkitMask: "url(/logo.svg) center / contain no-repeat",
+                                }}
+                            />
+                            <span className="text-3xl">VOZEB</span>
+                        </Link>
+                        <Link
+                            href="/"
+                            className="auth-back-home inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md border border-stone-200 bg-white/70 px-3 text-sm font-medium text-stone-700 transition hover:border-stone-300 hover:text-stone-950 dark:border-white/10 dark:bg-white/5 dark:text-stone-200 dark:hover:border-white/20 dark:hover:text-white"
+                        >
+                            <ArrowLeft className="size-4" />
+                            <span>返回首页</span>
+                        </Link>
                     </div>
-                    <p className="max-w-sm text-sm leading-6 text-stone-400">账号系统负责身份和权限，画布、素材、模型等工作流会保留在登录后的主界面里。</p>
+                    <div className="auth-page-brand-copy">
+                        <h1 className="text-balance text-2xl font-semibold tracking-normal sm:text-3xl">{firstUser ? "创建第一个管理员账号" : isRegister ? "创建你的 VOZEB 账号" : "继续你的 VOZEB 创作"}</h1>
+                    </div>
+                    <div className="auth-page-feature-list grid gap-2 text-sm text-stone-600 dark:text-stone-300">
+                        {["画布与素材自动保留", "提示词与模型集中管理", "管理员后台统一配置"].map((item) => (
+                            <div key={item} className="flex items-center gap-2">
+                                <span className="size-1.5 rounded-full bg-cyan-400" />
+                                <span>{item}</span>
+                            </div>
+                        ))}
+                    </div>
+                    <p className="auth-page-brand-description max-w-sm text-sm leading-6 text-stone-500 dark:text-stone-400">账号系统负责身份和权限，画布、素材、模型等工作流会保留在登录后的主界面里。</p>
                 </section>
                 {form}
             </div>
