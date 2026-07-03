@@ -1,12 +1,12 @@
 <p align="center">
-  <img src="web/public/logo.svg?v=0.5.1-white" width="108" alt="VOZEB logo">
+  <img src="web/public/logo.svg?v=0.5.2-white" width="108" alt="VOZEB logo">
 </p>
 
 <h1 align="center">VOZEB</h1>
 
 <p align="center">
   <a href="https://github.com/csyqlz/vozeb"><img src="https://img.shields.io/github/stars/csyqlz/vozeb?style=flat-square&logo=github" alt="GitHub stars"></a>
-  <a href="VERSION"><img src="https://img.shields.io/badge/version-v0.5.1-2563eb?style=flat-square" alt="Version"></a>
+  <a href="VERSION"><img src="https://img.shields.io/badge/version-v0.5.2-2563eb?style=flat-square" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-f97316?style=flat-square" alt="License"></a>
   <a href="https://vercel.com/"><img src="https://img.shields.io/badge/Vercel-ready-000000?style=flat-square&logo=vercel" alt="Vercel ready"></a>
   <a href="https://nextjs.org/"><img src="https://img.shields.io/badge/Next.js-16.2-000000?style=flat-square&logo=nextdotjs" alt="Next.js"></a>
@@ -14,7 +14,7 @@
 
 VOZEB 是一款面向 AI 图片创作、素材管理和视觉方案迭代的开源工作台。它把无限画布、AI 生成、参考图编辑、提示词库、素材沉淀、用户权限、管理员配置和本地 Agent 能力放到同一个工作流里，适合个人创作者、本地部署场景和小团队内部使用。
 
-VOZEB 当前版本为 `v0.5.1`，这是基于原开源项目 [basketikun/infinite-canvas](https://github.com/basketikun/infinite-canvas) 继续开发的二开版本。感谢原创作者 basketikun 对无限画布、AI 创作工作流、Canvas Agent 和 Codex 插件能力的开源贡献。
+VOZEB 当前版本为 `v0.5.2`，这是基于原开源项目 [basketikun/infinite-canvas](https://github.com/basketikun/infinite-canvas) 继续开发的二开版本。感谢原创作者 basketikun 对无限画布、AI 创作工作流、Canvas Agent 和 Codex 插件能力的开源贡献。
 
 > [!CAUTION]
 > 项目仍处于快速开发阶段，不保证历史数据兼容。当前更适合个人或本地部署，不建议直接公网多人共用。
@@ -32,6 +32,12 @@ VOZEB 当前版本为 `v0.5.1`，这是基于原开源项目 [basketikun/infinit
 - 本地 Agent：通过本机 Canvas Agent 连接 Codex / Claude Code，让 Agent 通过 MCP 操作当前画布。
 - Codex App 插件：提供 Codex app 插件，安装后可自动注册 MCP 并尝试拉起本地 Agent。
 - 版本更新：右上角版本入口可查看更新记录，并从 `csyqlz/vozeb` 检查最新版本。
+
+## v0.5.2 更新
+
+- 首页改为公开官网式首屏，登录入口直接融合到首页；已登录用户可一键进入工作台。
+- VOZEB 标题下方加入轻量动态披风 SVG 光翼，背景改为静态海蓝星海，保留视觉冲击同时避免 Canvas 粒子卡顿。
+- Next.js 构建支持 `NEXT_BUILD_CPUS` 限制 worker 数，Docker 默认 `NEXT_BUILD_CPUS=1`，更适合 2 核 2G 服务器构建。
 
 ## v0.5.1 更新
 

@@ -1,6 +1,6 @@
 "use client";
 
-import type { FormEvent } from "react";
+import type { FormEvent, ReactNode } from "react";
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -8,15 +8,19 @@ import { ArrowRight, LockKeyhole, UserRound } from "lucide-react";
 import { App, Button, Input } from "antd";
 
 import { type LocalUser, useUserStore } from "@/stores/use-user-store";
+import { cn } from "@/lib/utils";
 
 type AuthFormProps = {
     mode: "login" | "register";
     nextPath?: string;
     registrationEnabled?: boolean;
     firstUser?: boolean;
+    variant?: "page" | "embedded";
+    className?: string;
+    headerSlot?: ReactNode;
 };
 
-export function AuthForm({ mode, nextPath = "/canvas", registrationEnabled = true, firstUser = false }: AuthFormProps) {
+export function AuthForm({ mode, nextPath = "/canvas", registrationEnabled = true, firstUser = false, variant = "page", className, headerSlot }: AuthFormProps) {
     const router = useRouter();
     const { message } = App.useApp();
     const setUser = useUserStore((state) => state.setUser);
@@ -50,10 +54,75 @@ export function AuthForm({ mode, nextPath = "/canvas", registrationEnabled = tru
         }
     };
 
+    const form = (
+        <section className={cn("auth-panel flex min-h-full items-center", variant === "embedded" ? "p-6 sm:p-7" : "p-8 sm:p-10", className)}>
+            <form onSubmit={submit} className="w-full space-y-5">
+                {headerSlot}
+                <div>
+                    <p className="text-sm font-medium text-cyan-300">{firstUser ? "首次设置" : isRegister ? "创建账号" : "账号访问"}</p>
+                    <h2 className={cn("mt-2 font-semibold tracking-normal text-white", variant === "embedded" ? "text-2xl" : "text-3xl")}>{firstUser ? "创建第一个管理员账号" : isRegister ? "注册后进入 VOZEB" : "登录进入 VOZEB"}</h2>
+                    <p className="mt-3 text-sm leading-6 text-stone-400">{isRegister ? "用户名支持字母、数字、下划线、点和短横线。" : "输入账号后直接进入画布、素材、模型和提示词工作流。"}</p>
+                </div>
+
+                {disabled ? <div className="rounded-md border border-cyan-300/20 bg-cyan-300/8 px-4 py-3 text-sm text-cyan-50">当前站点已关闭注册，请联系管理员开通账号。</div> : null}
+
+                <label className="block space-y-2">
+                    <span className="text-sm font-medium text-stone-200">用户名</span>
+                    <Input size="large" prefix={<UserRound className="size-4 text-stone-500" />} value={username} onChange={(event) => setUsername(event.target.value)} placeholder="your_name" autoComplete="username" disabled={submitting || disabled} required />
+                </label>
+
+                {isRegister ? (
+                    <label className="block space-y-2">
+                        <span className="text-sm font-medium text-stone-200">显示名称</span>
+                        <Input size="large" value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="用于顶部账号菜单" autoComplete="name" disabled={submitting || disabled} />
+                    </label>
+                ) : null}
+
+                <label className="block space-y-2">
+                    <span className="text-sm font-medium text-stone-200">密码</span>
+                    <Input.Password
+                        size="large"
+                        prefix={<LockKeyhole className="size-4 text-stone-500" />}
+                        value={password}
+                        onChange={(event) => setPassword(event.target.value)}
+                        placeholder={isRegister ? "至少 8 位" : "请输入密码"}
+                        autoComplete={isRegister ? "new-password" : "current-password"}
+                        disabled={submitting || disabled}
+                        required
+                    />
+                </label>
+
+                <Button type="primary" htmlType="submit" size="large" block loading={submitting} disabled={disabled} icon={<ArrowRight className="size-4" />} iconPlacement="end">
+                    {isRegister ? "注册并进入" : "登录"}
+                </Button>
+
+                <div className="text-center text-sm text-stone-400">
+                    {isRegister ? (
+                        <>
+                            已有账号？{" "}
+                            <Link href="/login" className="font-medium text-white hover:underline">
+                                去登录
+                            </Link>
+                        </>
+                    ) : (
+                        <>
+                            没有账号？{" "}
+                            <Link href="/register" className="font-medium text-white hover:underline">
+                                去注册
+                            </Link>
+                        </>
+                    )}
+                </div>
+            </form>
+        </section>
+    );
+
+    if (variant === "embedded") return form;
+
     return (
-        <main className="flex min-h-dvh items-center justify-center bg-background px-6 py-10 text-foreground">
-            <div className="grid w-full max-w-5xl overflow-hidden border border-stone-200 bg-white md:grid-cols-[0.9fr_1fr] dark:border-stone-800 dark:bg-stone-950">
-                <section className="flex min-h-[360px] flex-col justify-between border-b border-stone-200 bg-stone-950 p-8 text-white md:border-b-0 md:border-r dark:border-stone-800">
+        <main className="auth-page-bg flex min-h-dvh items-center justify-center px-6 py-10 text-foreground">
+            <div className="grid w-full max-w-5xl overflow-hidden border border-white/10 bg-black/50 shadow-2xl shadow-cyan-950/20 backdrop-blur md:grid-cols-[0.9fr_1fr]">
+                <section className="flex min-h-[360px] flex-col justify-between border-b border-white/10 p-8 text-white md:border-b-0 md:border-r">
                     <Link href="/" className="inline-flex items-center gap-2 text-sm font-semibold">
                         <span
                             className="size-8 bg-cyan-300"
@@ -65,79 +134,12 @@ export function AuthForm({ mode, nextPath = "/canvas", registrationEnabled = tru
                         VOZEB
                     </Link>
                     <div>
-                        <p className="text-sm text-stone-400">{firstUser ? "首次设置" : isRegister ? "创建账号" : "账号访问"}</p>
+                        <p className="text-sm text-cyan-200/70">{firstUser ? "首次设置" : isRegister ? "创建账号" : "账号访问"}</p>
                         <h1 className="mt-3 text-balance text-3xl font-semibold tracking-normal">{firstUser ? "创建第一个管理员账号" : isRegister ? "注册后进入 VOZEB 工作台" : "登录继续你的 VOZEB 创作"}</h1>
                     </div>
-                    <p className="max-w-sm text-sm leading-6 text-stone-400">账号系统只负责身份和权限，画布、素材、模型等原有工作流会保留在登录后的主界面里。</p>
+                    <p className="max-w-sm text-sm leading-6 text-stone-400">账号系统负责身份和权限，画布、素材、模型等工作流会保留在登录后的主界面里。</p>
                 </section>
-
-                <section className="flex items-center p-8 sm:p-10">
-                    <form onSubmit={submit} className="w-full space-y-5">
-                        <div>
-                            <h2 className="text-2xl font-semibold text-stone-950 dark:text-stone-100">{isRegister ? "注册" : "登录"}</h2>
-                            <p className="mt-2 text-sm text-stone-500 dark:text-stone-400">{isRegister ? "用户名支持字母、数字、下划线、点和短横线。" : "输入用户名和密码进入工作台。"}</p>
-                        </div>
-
-                        {disabled ? <div className="border border-stone-200 bg-stone-50 px-4 py-3 text-sm text-stone-700 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-200">当前站点已关闭注册，请联系管理员开通账号。</div> : null}
-
-                        <label className="block space-y-2">
-                            <span className="text-sm font-medium text-stone-700 dark:text-stone-200">用户名</span>
-                            <Input
-                                size="large"
-                                prefix={<UserRound className="size-4 text-stone-400" />}
-                                value={username}
-                                onChange={(event) => setUsername(event.target.value)}
-                                placeholder="your_name"
-                                autoComplete="username"
-                                disabled={submitting || disabled}
-                                required
-                            />
-                        </label>
-
-                        {isRegister ? (
-                            <label className="block space-y-2">
-                                <span className="text-sm font-medium text-stone-700 dark:text-stone-200">显示名称</span>
-                                <Input size="large" value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="用于顶部账户菜单" autoComplete="name" disabled={submitting || disabled} />
-                            </label>
-                        ) : null}
-
-                        <label className="block space-y-2">
-                            <span className="text-sm font-medium text-stone-700 dark:text-stone-200">密码</span>
-                            <Input.Password
-                                size="large"
-                                prefix={<LockKeyhole className="size-4 text-stone-400" />}
-                                value={password}
-                                onChange={(event) => setPassword(event.target.value)}
-                                placeholder={isRegister ? "至少 8 位" : "请输入密码"}
-                                autoComplete={isRegister ? "new-password" : "current-password"}
-                                disabled={submitting || disabled}
-                                required
-                            />
-                        </label>
-
-                        <Button type="primary" htmlType="submit" size="large" block loading={submitting} disabled={disabled} icon={<ArrowRight className="size-4" />} iconPlacement="end">
-                            {isRegister ? "注册并进入" : "登录"}
-                        </Button>
-
-                        <div className="text-center text-sm text-stone-500 dark:text-stone-400">
-                            {isRegister ? (
-                                <>
-                                    已有账号？{" "}
-                                    <Link href="/login" className="font-medium text-stone-950 hover:underline dark:text-stone-100">
-                                        去登录
-                                    </Link>
-                                </>
-                            ) : (
-                                <>
-                                    没有账号？{" "}
-                                    <Link href="/register" className="font-medium text-stone-950 hover:underline dark:text-stone-100">
-                                        去注册
-                                    </Link>
-                                </>
-                            )}
-                        </div>
-                    </form>
-                </section>
+                {form}
             </div>
         </main>
     );

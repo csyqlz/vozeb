@@ -175,17 +175,25 @@
         position: relative;
     }
 
+    .hero-title-wrap.items-start {
+        align-items: flex-start;
+    }
+
     .hero-cape {
         height: clamp(72px, 10vw, 132px);
         margin-top: clamp(-26px, -2.8vw, -14px);
         max-width: min(760px, 92vw);
         overflow: visible;
         pointer-events: none;
+        transform-origin: 52% 40%;
         width: 100%;
+        animation: hero-cape-float 7s ease-in-out infinite;
     }
 
     .hero-cape-fill {
         opacity: 0.88;
+        transform-origin: 52% 48%;
+        animation: hero-cape-breathe 5.4s ease-in-out infinite;
     }
 
     .hero-cape-edge {
@@ -197,7 +205,10 @@
 
     .hero-cape-edge-main {
         opacity: 0.94;
+        stroke-dasharray: 720;
+        stroke-dashoffset: 0;
         stroke-width: 4.5;
+        animation: hero-cape-shimmer 5.8s ease-in-out infinite;
     }
 
     .hero-cape-edge-soft {
@@ -217,6 +228,39 @@
         filter: drop-shadow(0 0 12px rgba(125, 211, 252, 0.38));
     }
 
+    @keyframes hero-cape-float {
+        0%,
+        100% {
+            transform: translate3d(0, 0, 0) rotate(-0.4deg);
+        }
+        50% {
+            transform: translate3d(1.2%, -3px, 0) rotate(0.8deg);
+        }
+    }
+
+    @keyframes hero-cape-breathe {
+        0%,
+        100% {
+            opacity: 0.62;
+            transform: scaleX(0.985) skewX(-1deg);
+        }
+        48% {
+            opacity: 0.98;
+            transform: scaleX(1.025) skewX(1.4deg);
+        }
+    }
+
+    @keyframes hero-cape-shimmer {
+        0%,
+        100% {
+            stroke-dashoffset: 0;
+        }
+        50% {
+            stroke-dashoffset: -92;
+        }
+    }
+
+    .auth-page-bg,
     .animated-dot-bg {
         background:
             radial-gradient(ellipse 78% 42% at 50% 50%, rgba(255, 255, 255, 0.74), transparent 66%),
@@ -228,6 +272,7 @@
         position: relative;
     }
 
+    .dark .auth-page-bg,
     .dark .animated-dot-bg {
         background:
             radial-gradient(ellipse 46% 34% at 50% 42%, rgba(148, 163, 184, 0.2), transparent 68%),
@@ -237,11 +282,48 @@
             linear-gradient(180deg, #020617 0%, #020611 44%, #031827 100%);
     }
 
+    .auth-page-bg::before,
+    .animated-dot-bg::before {
+        background-image:
+            linear-gradient(rgba(125, 211, 252, 0.06) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(125, 211, 252, 0.06) 1px, transparent 1px),
+            radial-gradient(circle, rgba(125, 211, 252, 0.5) 0 1.15px, transparent 1.8px);
+        background-position:
+            0 0,
+            0 0,
+            10px 12px;
+        background-size:
+            72px 72px,
+            72px 72px,
+            24px 24px;
+        opacity: 0.42;
+    }
+
+    .auth-page-bg > *,
     .animated-dot-bg > * {
         position: relative;
         z-index: 1;
     }
 
+    .landing-feature-panel,
+    .landing-auth-shell,
+    .auth-panel {
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        background: linear-gradient(180deg, rgba(15, 23, 42, 0.74), rgba(2, 6, 23, 0.66));
+        box-shadow: 0 20px 80px rgba(2, 132, 199, 0.12);
+        backdrop-filter: blur(18px);
+    }
+
+    .landing-feature-panel {
+        min-height: 152px;
+        padding: 18px;
+    }
+
+    .landing-auth-shell {
+        overflow: hidden;
+    }
+
+    .auth-page-bg::before,
     .animated-dot-bg::before,
     .animated-dot-bg::after {
         content: "";
@@ -252,22 +334,10 @@
     }
 
     .animated-dot-bg::before {
-        background-image:
-            radial-gradient(circle, rgba(15, 23, 42, 0.16) 0 1px, transparent 1.55px),
-            radial-gradient(circle, rgba(6, 182, 212, 0.2) 0 0.9px, transparent 1.9px);
-        background-position:
-            0 0,
-            12px 10px;
-        background-size:
-            18px 18px,
-            54px 54px;
-        opacity: 0.58;
+        opacity: 0.52;
     }
 
     .dark .animated-dot-bg::before {
-        background-image:
-            radial-gradient(circle, rgba(248, 250, 252, 0.18) 0 1px, transparent 1.55px),
-            radial-gradient(circle, rgba(103, 232, 249, 0.3) 0 0.9px, transparent 1.9px);
         opacity: 0.64;
     }
 
@@ -283,6 +353,14 @@
             radial-gradient(ellipse 42% 30% at 50% 44%, rgba(125, 211, 252, 0.16), transparent 68%),
             linear-gradient(180deg, rgba(2, 6, 23, 0) 0%, rgba(2, 6, 23, 0.2) 64%, rgba(2, 6, 23, 0.34) 100%);
         opacity: 1;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .hero-cape,
+        .hero-cape-fill,
+        .hero-cape-edge-main {
+            animation: none;
+        }
     }
 
     .hide-scrollbar {

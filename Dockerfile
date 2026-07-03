@@ -6,6 +6,7 @@ WORKDIR /app/web
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV CI=1
 ENV NODE_OPTIONS=--max-old-space-size=1536
+ENV NEXT_BUILD_CPUS=1
 
 COPY web/package.json web/bun.lock ./
 RUN --mount=type=cache,target=/root/.bun/install/cache bun install --frozen-lockfile --cache-dir=/root/.bun/install/cache
