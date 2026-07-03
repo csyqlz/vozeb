@@ -6,7 +6,7 @@ import { App, Button, Form, Input, InputNumber, Modal, Popconfirm, Select, Space
 import type { TableColumnsType } from "antd";
 import { Database, Download, Gift, Globe2, Image as ImageIcon, KeyRound, Mail, PlugZap, Plus, RefreshCw, Save, Search, Send, ShieldCheck, SlidersHorizontal, Trash2, UserCog, UserRound, UsersRound } from "lucide-react";
 
-import type { AuthSettings, PublicUser, SystemModelChannel, UserQuota, UserRole, UserStatus } from "@/lib/auth/store";
+import type { AuthSettings, PublicUser, SiteSocialKey, SystemModelChannel, UserQuota, UserRole, UserStatus } from "@/lib/auth/store";
 import type { Prompt } from "@/services/api/prompts";
 
 type AdminDashboardProps = {
@@ -35,6 +35,13 @@ type UserEditorValue = {
 };
 
 type AdminSectionKey = "overview" | "site" | "settings" | "users" | "prompts";
+
+const siteSocialItems: Array<{ key: SiteSocialKey; label: string; placeholder: string; icon: ReactNode }> = [
+    { key: "email", label: "邮箱联系", placeholder: "mailto:contact@example.com", icon: <Mail className="size-4" /> },
+    { key: "telegram", label: "Telegram", placeholder: "https://t.me/vozeb", icon: <Send className="size-4" /> },
+    { key: "x", label: "X", placeholder: "https://x.com/vozeb", icon: <span className="text-xs font-bold">X</span> },
+    { key: "instagram", label: "Instagram", placeholder: "https://instagram.com/vozeb", icon: <span className="text-[11px] font-bold">IG</span> },
+];
 
 export function AdminDashboard({ initialUsers, initialSettings, initialPromptCount, currentUser }: AdminDashboardProps) {
     const { message } = App.useApp();
@@ -257,8 +264,21 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
         }
     };
 
-    const updateSiteSetting = (key: keyof AuthSettings["site"], value: string) => {
+    const updateSiteSetting = (key: keyof Omit<AuthSettings["site"], "socials">, value: string) => {
         setSettings((current) => ({ ...current, site: { ...current.site, [key]: value } }));
+    };
+
+    const updateSiteSocialSetting = (key: SiteSocialKey, patch: Partial<AuthSettings["site"]["socials"][SiteSocialKey]>) => {
+        setSettings((current) => ({
+            ...current,
+            site: {
+                ...current.site,
+                socials: {
+                    ...current.site.socials,
+                    [key]: { ...current.site.socials[key], ...patch },
+                },
+            },
+        }));
     };
 
     const fetchModelsForChannel = async (channel: SystemModelChannel) => {
@@ -486,6 +506,45 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                                         <LabeledControl label="SEO 关键词">
                                             <Input value={settings.site.seoKeywords} maxLength={240} placeholder="VOZEB,AI 绘图,无限画布" onChange={(event) => updateSiteSetting("seoKeywords", event.target.value)} />
                                         </LabeledControl>
+                                    </div>
+                                </div>
+
+                                <div className="border-t border-stone-200 pt-5 dark:border-stone-800">
+                                    <SectionTitle icon={<Globe2 className="size-4" />} title="首页收尾与社交媒体" />
+                                    <div className="mt-4 space-y-4">
+                                        <LabeledControl label="版权所有">
+                                            <Input value={settings.site.footerCopyright} maxLength={120} placeholder="© 2026 VOZEB. All rights reserved." onChange={(event) => updateSiteSetting("footerCopyright", event.target.value)} />
+                                        </LabeledControl>
+                                        <div className="grid gap-4 md:grid-cols-2">
+                                            <LabeledControl label="使用条款链接">
+                                                <Input value={settings.site.termsUrl} maxLength={2000} placeholder="/terms 或 https://..." onChange={(event) => updateSiteSetting("termsUrl", event.target.value)} />
+                                            </LabeledControl>
+                                            <LabeledControl label="隐私政策链接">
+                                                <Input value={settings.site.privacyUrl} maxLength={2000} placeholder="/privacy 或 https://..." onChange={(event) => updateSiteSetting("privacyUrl", event.target.value)} />
+                                            </LabeledControl>
+                                        </div>
+                                        <div className="grid gap-3">
+                                            {siteSocialItems.map((item) => {
+                                                const social = settings.site.socials[item.key];
+                                                return (
+                                                    <div key={item.key} className="rounded-lg border border-stone-200 bg-white p-3 dark:border-stone-800 dark:bg-stone-950/60">
+                                                        <div className="mb-3 flex items-center justify-between gap-3">
+                                                            <div className="flex items-center gap-2 text-sm font-semibold text-stone-950 dark:text-stone-100">
+                                                                <span className="flex size-7 items-center justify-center rounded-md bg-cyan-50 text-cyan-700 ring-1 ring-cyan-200/70 dark:bg-cyan-950/40 dark:text-cyan-200 dark:ring-cyan-900/60">
+                                                                    {item.icon}
+                                                                </span>
+                                                                {item.label}
+                                                            </div>
+                                                            <Switch checked={social.enabled} checkedChildren="显示" unCheckedChildren="隐藏" onChange={(enabled) => updateSiteSocialSetting(item.key, { enabled })} />
+                                                        </div>
+                                                        <div className="grid gap-3 md:grid-cols-[160px_minmax(0,1fr)]">
+                                                            <Input value={social.label} maxLength={32} placeholder={item.label} onChange={(event) => updateSiteSocialSetting(item.key, { label: event.target.value })} />
+                                                            <Input value={social.url} maxLength={2000} placeholder={item.placeholder} onChange={(event) => updateSiteSocialSetting(item.key, { url: event.target.value })} />
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
                                     </div>
                                 </div>
                             </div>

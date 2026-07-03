@@ -3,7 +3,7 @@
 import { type ReactNode, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowRight, Gauge, Image as ImageIcon, Layers3, ShieldCheck, Sparkles, Wand2 } from "lucide-react";
+import { ArrowRight, Gauge, Image as ImageIcon, Layers3, Mail, Send, ShieldCheck, Sparkles, Wand2 } from "lucide-react";
 import { App, Button, Image, Modal, Tag } from "antd";
 
 import { AuthForm } from "@/components/auth/auth-form";
@@ -21,9 +21,17 @@ type SessionPayload = {
             title: string;
             logoUrl: string;
             seoDescription?: string;
+            footerCopyright?: string;
+            termsUrl?: string;
+            privacyUrl?: string;
+            socials?: SiteSocialSettings;
         };
     };
 };
+
+type SiteSocialKey = "email" | "telegram" | "x" | "instagram";
+
+type SiteSocialSettings = Record<SiteSocialKey, { enabled: boolean; label: string; url: string }>;
 
 const featureItems = [
     { icon: Layers3, title: "无限画布", text: "把图片、文字、视频、音频与配置节点串成连续创作流。" },
@@ -36,6 +44,28 @@ const heroStats = [
     { icon: Gauge, value: "1 CPU", label: "低配构建模式" },
     { icon: ShieldCheck, value: ".data", label: "账号数据持久化" },
 ];
+
+const defaultSite = {
+    title: "VOZEB",
+    logoUrl: "/logo.svg",
+    seoDescription: "面向 AI 图片创作与管理的 VOZEB 工作台",
+    footerCopyright: "© 2026 VOZEB. All rights reserved.",
+    termsUrl: "/terms",
+    privacyUrl: "/privacy",
+    socials: {
+        email: { enabled: true, label: "邮箱联系", url: "mailto:contact@example.com" },
+        telegram: { enabled: true, label: "Telegram", url: "https://t.me/vozeb" },
+        x: { enabled: true, label: "X", url: "https://x.com/vozeb" },
+        instagram: { enabled: true, label: "Instagram", url: "https://instagram.com/vozeb" },
+    } satisfies SiteSocialSettings,
+};
+
+const socialIconByKey: Record<SiteSocialKey, ReactNode> = {
+    email: <Mail className="size-4" />,
+    telegram: <Send className="size-4" />,
+    x: <span className="text-xs font-bold">X</span>,
+    instagram: <span className="text-[11px] font-bold">IG</span>,
+};
 
 function Highlighter({ action, color, children }: { action: "highlight" | "underline"; color: string; children: ReactNode }) {
     return (
@@ -90,7 +120,7 @@ export default function HomePage() {
     const [previewIndex, setPreviewIndex] = useState(0);
     const [previewOpen, setPreviewOpen] = useState(false);
     const [authOpen, setAuthOpen] = useState(false);
-    const [site, setSite] = useState({ title: "VOZEB", logoUrl: "/logo.svg", seoDescription: "面向 AI 图片创作与管理的 VOZEB 工作台" });
+    const [site, setSite] = useState(defaultSite);
     const user = useUserStore((state) => state.user);
     const setUser = useUserStore((state) => state.setUser);
     const theme = useThemeStore((state) => state.theme);
@@ -243,6 +273,38 @@ export default function HomePage() {
                     </div>
                 </div>
             </section>
+
+            <footer className="landing-footer relative z-10 mx-auto max-w-[1200px] px-6 pb-10">
+                <div className="landing-footer-shell">
+                    <div className="landing-footer-brand flex min-w-0 items-center gap-4">
+                        <SiteLogo logoUrl={site.logoUrl} className="landing-footer-logo bg-stone-950 dark:bg-white" />
+                        <div className="min-w-0">
+                            <div className="truncate text-base font-semibold text-stone-950 dark:text-white">{site.title || "VOZEB"}</div>
+                            <div className="mt-1 text-sm text-stone-500 dark:text-stone-400">{site.footerCopyright}</div>
+                        </div>
+                    </div>
+                    <div className="landing-footer-actions">
+                        <div className="landing-footer-links">
+                            <Link href={site.termsUrl || "/terms"} className="landing-footer-link">
+                                使用条款
+                            </Link>
+                            <Link href={site.privacyUrl || "/privacy"} className="landing-footer-link">
+                                隐私政策
+                            </Link>
+                        </div>
+                        <div className="landing-footer-socials">
+                            {Object.entries(site.socials)
+                                .filter(([, social]) => social.enabled && social.url)
+                                .map(([key, social]) => (
+                                    <Link key={key} href={social.url} className="landing-footer-social" title={social.label} target={social.url.startsWith("/") ? undefined : "_blank"} rel={social.url.startsWith("/") ? undefined : "noreferrer"}>
+                                        {socialIconByKey[key as SiteSocialKey]}
+                                        <span className="sr-only">{social.label}</span>
+                                    </Link>
+                                ))}
+                        </div>
+                    </div>
+                </div>
+            </footer>
 
             <Image.PreviewGroup
                 preview={{

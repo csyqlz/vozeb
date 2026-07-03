@@ -40,6 +40,28 @@ export type SiteSettings = {
     seoTitle: string;
     seoDescription: string;
     seoKeywords: string;
+    footerCopyright: string;
+    termsUrl: string;
+    privacyUrl: string;
+    socials: SiteSocialSettings;
+};
+
+export type SiteSocialKey = "email" | "telegram" | "x" | "instagram";
+
+export type SiteSocialSettings = Record<
+    SiteSocialKey,
+    {
+        enabled: boolean;
+        label: string;
+        url: string;
+    }
+>;
+
+const DEFAULT_SITE_SOCIALS: SiteSocialSettings = {
+    email: { enabled: true, label: "邮箱联系", url: "mailto:contact@example.com" },
+    telegram: { enabled: true, label: "Telegram", url: "https://t.me/vozeb" },
+    x: { enabled: true, label: "X", url: "https://x.com/vozeb" },
+    instagram: { enabled: true, label: "Instagram", url: "https://instagram.com/vozeb" },
 };
 
 export type MailSettings = {
@@ -158,6 +180,10 @@ export const DEFAULT_SITE_SETTINGS: SiteSettings = {
     seoTitle: "VOZEB",
     seoDescription: "面向 AI 图片创作与管理的 VOZEB 工作台",
     seoKeywords: "VOZEB,AI 绘图,无限画布,提示词库,素材管理",
+    footerCopyright: "© 2026 VOZEB. All rights reserved.",
+    termsUrl: "/terms",
+    privacyUrl: "/privacy",
+    socials: DEFAULT_SITE_SOCIALS,
 };
 export const DEFAULT_MAIL_SETTINGS: MailSettings = {
     provider: "QQ 邮箱",
@@ -600,6 +626,28 @@ function normalizeSiteSettings(settings: Partial<SiteSettings> | undefined): Sit
         seoTitle,
         seoDescription: normalizeText(settings?.seoDescription, DEFAULT_SITE_SETTINGS.seoDescription, 180),
         seoKeywords: normalizeText(settings?.seoKeywords, DEFAULT_SITE_SETTINGS.seoKeywords, 240),
+        footerCopyright: normalizeText(settings?.footerCopyright, DEFAULT_SITE_SETTINGS.footerCopyright, 120),
+        termsUrl: normalizeLinkUrl(settings?.termsUrl, DEFAULT_SITE_SETTINGS.termsUrl),
+        privacyUrl: normalizeLinkUrl(settings?.privacyUrl, DEFAULT_SITE_SETTINGS.privacyUrl),
+        socials: normalizeSiteSocials(settings?.socials),
+    };
+}
+
+function normalizeSiteSocials(settings: Partial<SiteSocialSettings> | undefined): SiteSocialSettings {
+    return {
+        email: normalizeSiteSocial("email", settings?.email),
+        telegram: normalizeSiteSocial("telegram", settings?.telegram),
+        x: normalizeSiteSocial("x", settings?.x),
+        instagram: normalizeSiteSocial("instagram", settings?.instagram),
+    };
+}
+
+function normalizeSiteSocial(key: SiteSocialKey, setting: Partial<SiteSocialSettings[SiteSocialKey]> | undefined) {
+    const fallback = DEFAULT_SITE_SOCIALS[key];
+    return {
+        enabled: setting?.enabled !== false,
+        label: normalizeText(setting?.label, fallback.label, 32),
+        url: normalizeLinkUrl(setting?.url, fallback.url),
     };
 }
 
@@ -627,6 +675,13 @@ function normalizeLogoUrl(value: unknown) {
     if (!url) return DEFAULT_SITE_SETTINGS.logoUrl;
     if (url.startsWith("/") || url.startsWith("https://") || url.startsWith("http://") || url.startsWith("data:image/")) return url.slice(0, 2000);
     return DEFAULT_SITE_SETTINGS.logoUrl;
+}
+
+function normalizeLinkUrl(value: unknown, fallback: string) {
+    const url = typeof value === "string" ? value.trim() : "";
+    if (!url) return fallback;
+    if (url.startsWith("/") || url.startsWith("https://") || url.startsWith("http://") || url.startsWith("mailto:")) return url.slice(0, 2000);
+    return fallback;
 }
 
 function normalizeSystemChannel(channel: Partial<SystemModelChannel>): SystemModelChannel {
