@@ -168,6 +168,35 @@
         }
     }
 
+    .animated-dot-bg {
+        background-image: radial-gradient(circle, rgba(68, 64, 60, 0.22) 1px, transparent 1.4px);
+        background-position: 0 0;
+        background-size: 16px 16px;
+        animation: animated-dot-bg 24s linear infinite;
+    }
+
+    .dark .animated-dot-bg {
+        background-image: radial-gradient(circle, rgba(245, 245, 244, 0.2) 1px, transparent 1.4px);
+    }
+
+    @keyframes animated-dot-bg {
+        0% {
+            background-position: 0 0;
+        }
+        50% {
+            background-position: 16px 12px;
+        }
+        100% {
+            background-position: 32px 24px;
+        }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .animated-dot-bg {
+            animation: none;
+        }
+    }
+
     .hide-scrollbar {
         -ms-overflow-style: none;
         scrollbar-width: none;
