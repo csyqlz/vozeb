@@ -178,7 +178,7 @@ async function readPromptDb({ includeSeeds }: { includeSeeds: boolean }): Promis
     try {
         const raw = await readFile(PROMPT_DATA_FILE, "utf8");
         const db = JSON.parse(raw) as Partial<PromptDatabase>;
-        const normalized = {
+        const normalized: PromptDatabase = {
             version: 1,
             prompts: Array.isArray(db.prompts) ? db.prompts.map(normalizeStoredPrompt).filter(Boolean) : [],
             seedSources: Array.isArray(db.seedSources) ? db.seedSources.filter(Boolean) : [],

@@ -45,7 +45,15 @@ const heroStats = [
     { icon: ShieldCheck, value: ".data", label: "账号数据持久化" },
 ];
 
-const defaultSite = {
+const defaultSite: {
+    title: string;
+    logoUrl: string;
+    seoDescription: string;
+    footerCopyright: string;
+    termsUrl: string;
+    privacyUrl: string;
+    socials: SiteSocialSettings;
+} = {
     title: "VOZEB",
     logoUrl: "/logo.svg",
     seoDescription: "面向 AI 图片创作与管理的 VOZEB 工作台",

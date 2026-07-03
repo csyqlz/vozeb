@@ -837,9 +837,9 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                 {activeSection === "prompts" ? (
                     <Panel>
                         <PanelHeader title="公共提示词库" description="这里新增的提示词会出现在用户端“提示词库”；旧的外部仓库提示词已不再加载。" />
-                        <div className="grid gap-5 p-4 xl:grid-cols-[430px_minmax(0,1fr)] sm:p-5">
-                            <Form className="admin-prompt-form rounded-xl p-4" form={promptForm} layout="vertical" requiredMark={false} onFinish={createPrompt}>
-                                <div className="admin-prompt-note mb-5 rounded-lg p-3">
+                        <div className="grid gap-6 p-4 xl:grid-cols-[minmax(480px,0.92fr)_minmax(0,1.08fr)] sm:p-5">
+                            <Form className="admin-prompt-form rounded-xl px-5 py-5 sm:px-6" form={promptForm} layout="vertical" requiredMark={false} onFinish={createPrompt}>
+                                <div className="admin-prompt-note mb-6 rounded-lg p-4">
                                     <div className="flex items-center gap-2 text-sm font-semibold text-stone-950 dark:text-stone-100">
                                         <Plus className="size-4 text-cyan-600 dark:text-cyan-300" />
                                         新增公共提示词

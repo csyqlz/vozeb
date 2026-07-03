@@ -759,6 +759,30 @@
         box-shadow: 0 16px 42px rgba(15, 23, 42, 0.055);
     }
 
+    .admin-prompt-form .ant-form-item {
+        margin-bottom: 20px;
+    }
+
+    .admin-prompt-form .ant-form-item-label {
+        padding-bottom: 8px;
+    }
+
+    .admin-prompt-form .ant-input,
+    .admin-prompt-form .ant-input-affix-wrapper,
+    .admin-prompt-form textarea.ant-input {
+        border-radius: 9px;
+        padding-inline: 16px;
+    }
+
+    .admin-prompt-form .ant-input,
+    .admin-prompt-form .ant-input-affix-wrapper {
+        min-height: 46px;
+    }
+
+    .admin-prompt-form textarea.ant-input {
+        padding-block: 12px;
+    }
+
     .dark .admin-prompt-form {
         background: linear-gradient(180deg, rgba(15, 23, 42, 0.7), rgba(12, 10, 9, 0.46));
         border-color: rgba(255, 255, 255, 0.08);

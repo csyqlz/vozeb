@@ -15,14 +15,16 @@ export type ImageToolbarSettingsTool = {
     danger?: boolean;
 };
 
-type PreviewTool = ImageToolbarSettingsTool | {
-    id: "more";
-    title: string;
-    label: string;
-    icon: ReactNode;
-    active?: boolean;
-    danger?: boolean;
-};
+type PreviewTool =
+    | ImageToolbarSettingsTool
+    | {
+          id: "more";
+          title: string;
+          label: string;
+          icon: ReactNode;
+          active?: boolean;
+          danger?: boolean;
+      };
 
 type PreviewScroll = {
     left: number;
@@ -56,10 +58,7 @@ export function ImageToolSettingsModal({
     const [previewScroll, setPreviewScroll] = useState<PreviewScroll>({ left: 0, max: 0, viewport: 1, content: 1 });
     const selected = useMemo(() => new Set(selectedIds), [selectedIds]);
     const selectedTools = tools.filter((tool) => selected.has(tool.id));
-    const previewTools: PreviewTool[] = [
-        ...selectedTools,
-        { id: "more", title: "配置快捷工具", label: "更多", icon: <Ellipsis className="size-4" />, active: true },
-    ];
+    const previewTools: PreviewTool[] = [...selectedTools, { id: "more", title: "配置快捷工具", label: "更多", icon: <Ellipsis className="size-4" />, active: true }];
 
     const syncPreviewScroll = useCallback(() => {
         const toolbar = previewToolbarRef.current;
@@ -102,10 +101,12 @@ export function ImageToolSettingsModal({
         frames.push(firstFrame);
         const timer = window.setTimeout(sync, 120);
         const resizeObserver = typeof ResizeObserver !== "undefined" && toolbar ? new ResizeObserver(sync) : null;
-        resizeObserver?.observe(toolbar);
-        toolbar?.childNodes.forEach((child) => {
-            if (child instanceof Element) resizeObserver?.observe(child);
-        });
+        if (resizeObserver && toolbar) {
+            resizeObserver.observe(toolbar);
+            toolbar.childNodes.forEach((child) => {
+                if (child instanceof Element) resizeObserver.observe(child);
+            });
+        }
         sync();
         window.addEventListener("resize", syncPreviewScroll);
         return () => {
@@ -167,10 +168,7 @@ export function ImageToolSettingsModal({
                             <PreviewToolbarItem key={tool.id} tool={tool} showLabels={showLabels} />
                         ))}
                     </div>
-                    <div
-                        className="flex h-48 w-full max-w-[360px] flex-col items-center justify-center rounded-xl border"
-                        style={{ background: token.colorFillAlter, borderColor: token.colorBorderSecondary, color: token.colorTextSecondary }}
-                    >
+                    <div className="flex h-48 w-full max-w-[360px] flex-col items-center justify-center rounded-xl border" style={{ background: token.colorFillAlter, borderColor: token.colorBorderSecondary, color: token.colorTextSecondary }}>
                         <ImageIcon className="mb-2 size-8" />
                         <Typography.Text type="secondary">图片节点</Typography.Text>
                     </div>
