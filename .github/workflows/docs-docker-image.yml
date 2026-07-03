@@ -2,6 +2,7 @@ name: Docs Docker image
 
 on:
   push:
+    branches: ["main"]
     tags: ["v*"]
   workflow_dispatch:
 
