@@ -1,4 +1,4 @@
-# Infinite Canvas Agent
+# VOZEB Canvas Agent
 
 本地 Canvas Agent 用来连接画布网页和用户电脑上的 Codex / Claude Code。本地开发时优先连接 `http://localhost:3000`，不需要先使用线上站点。
 
@@ -42,14 +42,14 @@ Canvas Agent 默认只监听 `127.0.0.1`。网页第一次带正确 token 连接
 
 ### Codex app 插件
 
-仓库内提供了 Codex app 插件：`plugins/infinite-canvas`。在 Codex app 中添加本仓库的 marketplace 后，可以安装 `Infinite Canvas` 插件；插件会注册同一个 `infinite-canvas` MCP，并带上画布操作说明。
+仓库内提供了 Codex app 插件：`plugins/vozeb-canvas`。在 Codex app 中添加本仓库的 marketplace 后，可以安装 `VOZEB Canvas` 插件；插件会注册 `vozeb-canvas` MCP，并带上画布操作说明。
 
 添加本地 marketplace 时建议使用仓库绝对路径，避免 Codex 从其他工作目录解析失败：
 
 ```bash
-cd /path/to/infinite-canvas
+cd /path/to/vozeb
 codex plugin marketplace add "$(pwd)"
-codex plugin add infinite-canvas@infinite-canvas-local
+codex plugin add vozeb-canvas@vozeb-canvas-local
 ```
 
 插件默认通过 npm 启动 MCP：
@@ -58,9 +58,9 @@ codex plugin add infinite-canvas@infinite-canvas-local
 npx -y @basketikun/canvas-agent mcp
 ```
 
-使用时可以直接在 Codex 里说“打开 Infinite Canvas”，插件会优先启动本地画布和本地 Agent，读取 Local URL 和 Connect token，然后直接打开画布网页地址新建并连接画布。如果自动连接失败，再检查本地画布服务和 Canvas Agent 是否都已启动。
+使用时可以直接在 Codex 里说“打开 VOZEB Canvas”，插件会优先启动本地画布和本地 Agent，读取 Local URL 和 Connect token，然后直接打开画布网页地址新建并连接画布。如果自动连接失败，再检查本地画布服务和 Canvas Agent 是否都已启动。
 
-Canvas Agent 启动后，给 Codex 添加 MCP：
+Canvas Agent 启动后，也可以手动给 Codex 添加 MCP。下面继续使用 `infinite-canvas` 作为 MCP 名称，是为了兼容 Canvas Agent 内部提示和旧配置：
 
 ```bash
 codex mcp add infinite-canvas -- npx -y @basketikun/canvas-agent mcp
@@ -69,7 +69,7 @@ codex mcp add infinite-canvas -- npx -y @basketikun/canvas-agent mcp
 本仓库开发时可以改成，实际使用建议替换为本机绝对路径：
 
 ```bash
-codex mcp add infinite-canvas -- node /path/to/infinite-canvas/canvas-agent/dist/index.js mcp
+codex mcp add infinite-canvas -- node /path/to/vozeb/canvas-agent/dist/index.js mcp
 ```
 
 Canvas Agent 源码使用 TypeScript 编写，MCP 协议层使用官方 `@modelcontextprotocol/sdk`，工具入参使用 `zod` 描述。

@@ -7,7 +7,7 @@ description: 在 Codex App 中安装并使用 VOZEB 插件
 
 VOZEB 提供了一个 Codex App 插件，用来把 Codex 和本地 Canvas Agent 连接起来。安装后，你可以直接在 Codex 中说“打开 VOZEB”，让 Codex 打开画布、读取节点、创建节点并触发生成流程。
 
-插件源码位于仓库的 `plugins/infinite-canvas/` 目录。
+插件源码位于仓库的 `plugins/vozeb-canvas/` 目录。
 
 ## 安装方式
 
@@ -17,9 +17,9 @@ VOZEB 提供了一个 Codex App 插件，用来把 Codex 和本地 Canvas Agent 
 
 ```text
 请从 https://github.com/csyqlz/vozeb.git 安装 VOZEB Codex 插件。
-请 clone 仓库到 ~/plugins/infinite-canvas，确认 plugins/infinite-canvas/.codex-plugin/plugin.json 存在，
-把 plugins/infinite-canvas 加入 personal marketplace，先运行 codex plugin marketplace add ~，
-再运行 codex plugin add infinite-canvas@personal。
+请 clone 仓库到 ~/plugins/vozeb-canvas，确认 plugins/vozeb-canvas/.codex-plugin/plugin.json 存在，
+把 plugins/vozeb-canvas 加入 personal marketplace，先运行 codex plugin marketplace add ~，
+再运行 codex plugin add vozeb-canvas@personal。
 安装后请校验插件，并告诉我是否需要开启一个新对话来加载新技能和 MCP 工具。
 ```
 
@@ -31,10 +31,10 @@ VOZEB 提供了一个 Codex App 插件，用来把 Codex 和本地 Canvas Agent 
 
 ```bash
 mkdir -p ~/plugins
-git clone https://github.com/csyqlz/vozeb.git ~/plugins/infinite-canvas
+git clone https://github.com/csyqlz/vozeb.git ~/plugins/vozeb-canvas
 ```
 
-确保 `~/.agents/plugins/marketplace.json` 中有 Infinite Canvas 条目。这里的 `path` 要指向仓库里的插件子目录：
+确保 `~/.agents/plugins/marketplace.json` 中有 VOZEB Canvas 条目。这里的 `path` 要指向仓库里的插件子目录：
 
 ```json
 {
@@ -44,10 +44,10 @@ git clone https://github.com/csyqlz/vozeb.git ~/plugins/infinite-canvas
   },
   "plugins": [
     {
-      "name": "infinite-canvas",
+      "name": "vozeb-canvas",
       "source": {
         "source": "local",
-        "path": "./plugins/infinite-canvas/plugins/infinite-canvas"
+        "path": "./plugins/vozeb-canvas/plugins/vozeb-canvas"
       },
       "policy": {
         "installation": "AVAILABLE",
@@ -63,7 +63,7 @@ git clone https://github.com/csyqlz/vozeb.git ~/plugins/infinite-canvas
 
 ```bash
 codex plugin marketplace add ~
-codex plugin add infinite-canvas@personal
+codex plugin add vozeb-canvas@personal
 ```
 
 安装完成后，建议新建一个 Codex 对话，让新的 skill 和 MCP 工具完整加载。
@@ -75,10 +75,10 @@ codex plugin add infinite-canvas@personal
 ```bash
 cd /path/to/vozeb
 codex plugin marketplace add "$(pwd)"
-codex plugin add infinite-canvas@infinite-canvas-local
+codex plugin add vozeb-canvas@vozeb-canvas-local
 ```
 
-仓库内的 `.agents/plugins/marketplace.json` 已经指向 `./plugins/infinite-canvas`，适合开发者本地调试。
+仓库内的 `.agents/plugins/marketplace.json` 已经指向 `./plugins/vozeb-canvas`，适合开发者本地调试。
 
 ## 使用插件
 
@@ -102,9 +102,9 @@ codex plugin add infinite-canvas@infinite-canvas-local
 
 普通业务代码变更通常不需要更新插件。只有改了下面这些内容时，才建议重新安装或刷新插件：
 
-- `plugins/infinite-canvas/.codex-plugin/plugin.json`
-- `plugins/infinite-canvas/.mcp.json`
-- `plugins/infinite-canvas/skills/` 下的技能说明
+- `plugins/vozeb-canvas/.codex-plugin/plugin.json`
+- `plugins/vozeb-canvas/.mcp.json`
+- `plugins/vozeb-canvas/skills/` 下的技能说明
 - 插件暴露的 MCP、app 或入口脚本
 
 重新安装后建议开启新对话，避免旧对话继续使用缓存中的技能和 MCP 工具。
