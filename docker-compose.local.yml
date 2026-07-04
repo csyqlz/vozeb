@@ -8,6 +8,9 @@ services:
       - "3000:3000"
     volumes:
       - vozeb-data:/app/web/.data
+    environment:
+      NEXT_TELEMETRY_DISABLED: "1"
+      VOZEB_DATA_DIR: /app/web/.data
     restart: unless-stopped
 
 volumes:

@@ -449,6 +449,42 @@
         -webkit-backdrop-filter: blur(18px) saturate(1.45);
     }
 
+    .app-shell-actions {
+        scrollbar-width: none;
+    }
+
+    .app-shell-actions::-webkit-scrollbar {
+        display: none;
+    }
+
+    .app-user-status-actions .app-points-action,
+    .app-user-status-actions .app-checkin-action {
+        border-radius: 999px;
+    }
+
+    .app-user-status-actions .app-checkin-action {
+        min-width: 58px;
+    }
+
+    .user-points-popover {
+        max-width: calc(100vw - 24px);
+    }
+
+    .user-points-popover .ant-popover-content {
+        max-width: calc(100vw - 24px);
+    }
+
+    .user-points-popover .ant-popover-inner {
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        border-radius: 14px;
+        box-shadow: 0 18px 42px rgba(15, 23, 42, 0.12);
+    }
+
+    .dark .user-points-popover .ant-popover-inner {
+        border-color: rgba(255, 255, 255, 0.08);
+        box-shadow: 0 18px 42px rgba(0, 0, 0, 0.36);
+    }
+
     .landing-login-button.ant-btn {
         border-color: rgba(15, 23, 42, 0.12);
         color: #111827;
@@ -935,6 +971,34 @@
             padding-inline: 16px;
         }
 
+        .app-shell-header > div {
+            gap: 8px;
+            max-width: 100%;
+            padding-inline: 12px;
+        }
+
+        .app-shell-actions {
+            flex: 0 1 auto;
+            max-width: min(64vw, 264px);
+        }
+
+        .app-shell-header .app-user-status-actions {
+            gap: 6px;
+        }
+
+        .app-shell-header .app-user-status-actions .app-points-action {
+            min-width: 62px;
+        }
+
+        .app-shell-header .app-user-status-actions .app-checkin-action {
+            min-width: 60px;
+            padding-inline: 10px;
+        }
+
+        .user-points-popover .ant-popover-inner {
+            width: min(17rem, calc(100vw - 24px));
+        }
+
         .landing-site-header > div > a {
             flex: 1 1 auto;
             min-width: 0;
@@ -1193,6 +1257,35 @@
         .landing-site-header > div {
             gap: 10px;
             padding-inline: 12px;
+        }
+
+        .app-shell-header > div {
+            gap: 6px;
+            padding-inline: 10px;
+        }
+
+        .app-shell-actions {
+            max-width: min(63vw, 238px);
+        }
+
+        .app-shell-header .app-user-status-actions {
+            gap: 5px;
+        }
+
+        .app-shell-header .app-user-status-actions .app-points-action {
+            min-width: 58px;
+            padding-inline: 7px;
+        }
+
+        .app-shell-header .app-user-status-actions .app-checkin-action {
+            min-width: 56px;
+            padding-inline: 8px;
+        }
+
+        .app-shell-header .app-user-status-actions .app-account-action {
+            max-width: 32px;
+            padding-inline: 0 !important;
+            width: 32px;
         }
 
         .landing-site-header .landing-login-button.ant-btn {
@@ -2366,10 +2459,17 @@ html.dark .canvas-agent-confirm-switch.ant-switch.ant-switch-checked:hover:not(.
     }
 
     .canvas-agent-button.ant-btn {
+        align-items: center !important;
+        display: inline-flex !important;
         height: 34px !important;
+        justify-content: center !important;
         min-width: 34px !important;
         padding-inline: 0 !important;
         width: 34px !important;
+    }
+
+    .canvas-agent-button.ant-btn .ant-btn-icon {
+        margin-inline-end: 0 !important;
     }
 
     .canvas-agent-button.ant-btn > span:not(.ant-btn-icon) {

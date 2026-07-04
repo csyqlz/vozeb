@@ -1,12 +1,12 @@
 <p align="center">
-  <img src="web/public/logo.svg?v=0.8.3-white" width="108" alt="VOZEB logo">
+  <img src="web/public/logo.svg?v=0.8.4-white" width="108" alt="VOZEB logo">
 </p>
 
 <h1 align="center">VOZEB</h1>
 
 <p align="center">
   <a href="https://github.com/csyqlz/vozeb"><img src="https://img.shields.io/github/stars/csyqlz/vozeb?style=flat-square&logo=github" alt="GitHub stars"></a>
-  <a href="VERSION"><img src="https://img.shields.io/badge/version-v0.8.3-2563eb?style=flat-square" alt="Version"></a>
+  <a href="VERSION"><img src="https://img.shields.io/badge/version-v0.8.4-2563eb?style=flat-square" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-f97316?style=flat-square" alt="License"></a>
   <a href="https://vercel.com/"><img src="https://img.shields.io/badge/Vercel-ready-000000?style=flat-square&logo=vercel" alt="Vercel ready"></a>
   <a href="https://nextjs.org/"><img src="https://img.shields.io/badge/Next.js-16.2-000000?style=flat-square&logo=nextdotjs" alt="Next.js"></a>
@@ -18,15 +18,15 @@
 
 VOZEB 是一款面向 AI 图片创作、素材管理和视觉方案迭代的开源工作台。它把无限画布、AI 生成、参考图编辑、提示词库、素材沉淀、用户权限、管理员配置和本地 Agent 能力放到同一个工作流里，适合个人创作者、本地部署场景和小团队内部使用。
 
-VOZEB 当前版本为 `v0.8.3`，这是基于原创开源画布项目继续开发的二开版本。感谢原创作者 basketikun 对无限画布、AI 创作工作流、Canvas Agent 和 Codex 插件能力的开源贡献。
+VOZEB 当前版本为 `v0.8.4`，这是基于原创开源画布项目继续开发的二开版本。感谢原创作者 basketikun 对无限画布、AI 创作工作流、Canvas Agent 和 Codex 插件能力的开源贡献。
 
 版本更新记录请查看 [GitHub Releases](https://github.com/csyqlz/vozeb/releases)。
 
 ## 最新更新
 
-`v0.8.3` 优化管理员后台用户管理工具栏：搜索、已选数量、显示数量和批量删除整理为一条更紧凑的筛选带，桌面端减少大片空白，手机端会自然换行而不横向溢出。
+`v0.8.4` 修复手机端顶部用户状态区：签到按钮改回完整“签到/已签到”文案，积分记录弹层收窄并靠视口对齐，避免在工作台小屏下漂移或遮挡异常。
 
-`v0.8.3` 同步修正 GitHub Release 维护规则：连续版本只写当前版本更新，只有发布页出现版本断层时才在最新版本说明里补齐中间版本；同时补齐旧 Release 标题里的 `VOZEB` 前缀，并更新 Canvas Agent、Codex 插件和 README 截图脚本的 VOZEB 维护说明。本次不新增运行依赖，继续保持 0.5G 服务器和 GitHub Actions/GHCR 构建路径稳定。
+`v0.8.4` 同步统一画布手机端 Agent 按钮的边框、阴影和图标居中效果，并给本地 Compose 与 Render 部署文件补充低内存和数据目录配置说明。本次不新增运行依赖，继续保持 0.5G 服务器和 GitHub Actions/GHCR 构建路径稳定。
 
 > [!CAUTION]
 > 项目仍处于快速开发阶段，不保证历史数据兼容。当前更适合个人或本地部署，不建议直接公网多人共用。

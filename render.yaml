@@ -8,3 +8,9 @@ services:
     envVars:
       - key: PORT
         value: 3000
+      - key: NODE_OPTIONS
+        value: --max-old-space-size=384
+      - key: UV_THREADPOOL_SIZE
+        value: "2"
+      - key: VOZEB_DATA_DIR
+        value: /app/web/.data

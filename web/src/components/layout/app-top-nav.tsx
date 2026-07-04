@@ -83,7 +83,7 @@ export function AppTopNav() {
                             })}
                         </nav>
 
-                        <div className="my-auto flex h-9 max-w-[calc(100vw-9rem)] min-w-0 items-center justify-end overflow-x-auto overflow-y-visible whitespace-nowrap sm:max-w-[calc(100vw-12rem)] lg:max-w-none">
+                        <div className="app-shell-actions my-auto flex h-9 max-w-[calc(100vw-9rem)] min-w-0 items-center justify-end overflow-x-auto overflow-y-visible whitespace-nowrap sm:max-w-[calc(100vw-12rem)] lg:max-w-none">
                             <UserStatusActions />
                         </div>
                     </div>

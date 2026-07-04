@@ -76,7 +76,7 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
     const gitHubStyle = iconStyle;
     const showCheckIn = variant !== "canvas";
     const checkInLabel = checkingIn ? "签到中" : user?.checkedInToday ? "已签到" : "签到";
-    const compactCheckInLabel = checkingIn ? "中" : user?.checkedInToday ? "已签" : "签到";
+    const compactCheckInLabel = checkInLabel;
     const accountItems: MenuProps["items"] = [
         {
             key: "profile",
@@ -160,21 +160,22 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
     };
 
     return (
-        <div className={cn("inline-flex shrink-0 items-center gap-1.5 sm:gap-2", variant === "canvas" && "canvas-user-status-actions")}>
+        <div className={cn("user-status-actions inline-flex shrink-0 items-center gap-1.5 sm:gap-2", variant === "canvas" ? "canvas-user-status-actions" : "app-user-status-actions")}>
             {user ? (
                 <Popover
+                    rootClassName="user-points-popover"
                     open={pointsOpen}
                     onOpenChange={(open) => {
                         setPointsOpen(open);
                         if (open) void loadPointRecords();
                     }}
                     trigger="click"
-                    placement={variant === "canvas" ? "bottomRight" : "bottomLeft"}
+                    placement="bottomRight"
                     content={<PointRecordPanel loading={pointsLoading} records={pointRecords} />}
                 >
                     <button
                         type="button"
-                        className={cn(variant === "canvas" ? canvasControlClass : defaultControlClass, "gap-1 px-2 text-xs font-semibold sm:gap-1.5 sm:px-2.5", variant === "canvas" && "canvas-points-action")}
+                        className={cn(variant === "canvas" ? canvasControlClass : defaultControlClass, "gap-1 px-2 text-xs font-semibold sm:gap-1.5 sm:px-2.5", variant === "canvas" ? "canvas-points-action" : "app-points-action")}
                         style={iconStyle}
                         title="积分余额"
                     >
@@ -188,7 +189,7 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
                     type="button"
                     className={cn(
                         defaultControlClass,
-                        "px-2.5 text-sm font-semibold text-sky-700 hover:border-sky-200 hover:bg-sky-50 hover:text-sky-800 dark:text-sky-200 dark:hover:border-sky-400/25 dark:hover:bg-sky-400/10 dark:hover:text-sky-100 sm:px-3",
+                        "app-checkin-action px-2.5 text-sm font-semibold text-sky-700 disabled:cursor-default disabled:opacity-100 hover:border-sky-200 hover:bg-sky-50 hover:text-sky-800 dark:text-sky-200 dark:hover:border-sky-400/25 dark:hover:bg-sky-400/10 dark:hover:text-sky-100 sm:px-3",
                         user.checkedInToday && "text-stone-600 hover:border-stone-200 hover:bg-white/85 hover:text-stone-600 dark:text-stone-300 dark:hover:border-stone-800 dark:hover:bg-stone-950/35 dark:hover:text-stone-300",
                     )}
                     disabled={user.checkedInToday || checkingIn}
@@ -224,7 +225,7 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
                     <Dropdown menu={{ items: accountItems, onClick: handleMenuClick }} trigger={["click"]} placement="bottomRight">
                         <button
                             type="button"
-                            className={cn(variant === "canvas" ? canvasControlClass : defaultControlClass, "max-w-[36px] gap-2 px-2.5 sm:max-w-40", variant === "canvas" && "canvas-account-action")}
+                            className={cn(variant === "canvas" ? canvasControlClass : defaultControlClass, "max-w-[36px] gap-2 px-2.5 sm:max-w-40", variant === "canvas" ? "canvas-account-action" : "app-account-action")}
                             style={iconStyle}
                             aria-label="账户菜单"
                             title="账户菜单"
