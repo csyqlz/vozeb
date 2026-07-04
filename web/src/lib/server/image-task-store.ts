@@ -1,5 +1,7 @@
 import { randomUUID } from "crypto";
 
+import type { GenerationLogSource } from "@/lib/server/generation-log-store";
+
 export type ImageTaskKind = "generation" | "edit";
 export type ImageTaskStatus = "pending" | "running" | "success" | "error";
 
@@ -24,7 +26,11 @@ export type ImageTaskReference = {
 export type ImageTask = {
     id: string;
     userId: string;
+    username: string;
+    displayName: string;
     kind: ImageTaskKind;
+    source: GenerationLogSource;
+    title?: string;
     status: ImageTaskStatus;
     createdAt: number;
     updatedAt: number;

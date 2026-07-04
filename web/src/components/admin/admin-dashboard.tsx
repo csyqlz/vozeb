@@ -2,13 +2,15 @@
 
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { App, Button, Checkbox, Form, Input, InputNumber, Modal, Pagination, Popconfirm, Select, Space, Switch, Table, Tag } from "antd";
+import { App, Button, Checkbox, DatePicker, Form, Input, InputNumber, Modal, Pagination, Popconfirm, Select, Space, Switch, Table, Tag } from "antd";
 import type { TableColumnsType } from "antd";
-import { Database, Download, Gift, Globe2, Image as ImageIcon, KeyRound, Mail, PlugZap, Plus, RefreshCw, Save, Search, Send, ShieldCheck, SlidersHorizontal, Sparkles, Trash2, Upload, UserCog, UserRound, UsersRound } from "lucide-react";
+import { Database, Download, Eye, Film, Gift, Globe2, Image as ImageIcon, KeyRound, Mail, PlugZap, Plus, RefreshCw, Save, Search, Send, ShieldCheck, SlidersHorizontal, Sparkles, Trash2, Upload, UserCog, UserRound, UsersRound } from "lucide-react";
+import dayjs from "dayjs";
 import { nanoid } from "nanoid";
 
 import { DEFAULT_MODEL_POINT_COST_KEY } from "@/constant/credits";
 import type { AuthSettings, PublicUser, SiteFriendLink, SiteSocialKey, SystemModelChannel, UserRole, UserStatus } from "@/lib/auth/store";
+import type { StoredGenerationLog } from "@/lib/server/generation-log-store";
 import type { Prompt } from "@/services/api/prompts";
 
 type AdminDashboardProps = {
@@ -37,10 +39,11 @@ type UserEditorValue = {
     pointsBalance: number;
 };
 
-type AdminSectionKey = "overview" | "site" | "settings" | "users" | "prompts";
+type AdminSectionKey = "overview" | "site" | "settings" | "users" | "logs" | "prompts";
 
 const PROMPT_PAGE_SIZE = 20;
 const PROMPT_SEARCH_DEBOUNCE_MS = 300;
+const GENERATION_LOG_PAGE_SIZE = 20;
 
 const siteSocialItems: Array<{ key: SiteSocialKey; label: string; placeholder: string; icon: ReactNode }> = [
     { key: "email", label: "邮箱联系", placeholder: "mailto:contact@example.com", icon: <Mail className="size-4" /> },
@@ -50,11 +53,13 @@ const siteSocialItems: Array<{ key: SiteSocialKey; label: string; placeholder: s
 ];
 
 export function AdminDashboard({ initialUsers, initialSettings, initialPromptCount, currentUser }: AdminDashboardProps) {
-    const { message } = App.useApp();
+    const { message, modal } = App.useApp();
     const [promptForm] = Form.useForm<PromptFormValue>();
     const [userForm] = Form.useForm<UserEditorValue>();
     const logoInputRef = useRef<HTMLInputElement>(null);
+    const backupInputRef = useRef<HTMLInputElement>(null);
     const promptRequestIdRef = useRef(0);
+    const generationLogRequestIdRef = useRef(0);
     const [users, setUsers] = useState(initialUsers);
     const [settings, setSettings] = useState(initialSettings);
     const [prompts, setPrompts] = useState<Prompt[]>([]);
@@ -63,6 +68,7 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
     const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
     const [settingsLoading, setSettingsLoading] = useState(false);
     const [backupLoading, setBackupLoading] = useState(false);
+    const [backupImporting, setBackupImporting] = useState(false);
     const [mailTestLoading, setMailTestLoading] = useState(false);
     const [mailTestTo, setMailTestTo] = useState("");
     const [fetchingModelId, setFetchingModelId] = useState("");
@@ -77,6 +83,20 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
     const [userSearch, setUserSearch] = useState("");
     const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
     const [bulkDeletingUsers, setBulkDeletingUsers] = useState(false);
+    const [generationLogs, setGenerationLogs] = useState<StoredGenerationLog[]>([]);
+    const [generationLogTotal, setGenerationLogTotal] = useState(0);
+    const [generationLogPage, setGenerationLogPage] = useState(1);
+    const [generationLogSearch, setGenerationLogSearch] = useState("");
+    const [generationLogKind, setGenerationLogKind] = useState("");
+    const [generationLogSource, setGenerationLogSource] = useState("");
+    const [generationLogStatus, setGenerationLogStatus] = useState("");
+    const [generationLogUserId, setGenerationLogUserId] = useState("");
+    const [generationLogStart, setGenerationLogStart] = useState("");
+    const [generationLogEnd, setGenerationLogEnd] = useState("");
+    const [selectedGenerationLogIds, setSelectedGenerationLogIds] = useState<string[]>([]);
+    const [generationLogsLoading, setGenerationLogsLoading] = useState(false);
+    const [bulkDeletingGenerationLogs, setBulkDeletingGenerationLogs] = useState(false);
+    const [viewingGenerationLog, setViewingGenerationLog] = useState<StoredGenerationLog | null>(null);
     const [editingUser, setEditingUser] = useState<PublicUser | null>(null);
     const [creatingUser, setCreatingUser] = useState(false);
     const [activeSection, setActiveSection] = useState<AdminSectionKey>("overview");
@@ -105,6 +125,7 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
     }, [userSearch, users]);
     const selectedUsers = useMemo(() => users.filter((user) => selectedUserIds.includes(user.id)), [selectedUserIds, users]);
     const selectedPrompts = useMemo(() => prompts.filter((prompt) => selectedPromptIds.includes(prompt.id)), [prompts, selectedPromptIds]);
+    const selectedGenerationLogs = useMemo(() => generationLogs.filter((log) => selectedGenerationLogIds.includes(log.id)), [generationLogs, selectedGenerationLogIds]);
     const promptListStart = promptListTotal ? (promptPage - 1) * PROMPT_PAGE_SIZE + 1 : 0;
     const promptListEnd = Math.min(promptPage * PROMPT_PAGE_SIZE, promptListTotal);
 
@@ -117,6 +138,11 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
         if (activeSection !== "prompts") return;
         void loadPrompts(promptPage, debouncedPromptSearch);
     }, [activeSection, promptPage, debouncedPromptSearch]);
+
+    useEffect(() => {
+        if (activeSection !== "logs") return;
+        void loadGenerationLogs();
+    }, [activeSection, generationLogPage, generationLogSearch, generationLogKind, generationLogSource, generationLogStatus, generationLogUserId, generationLogStart, generationLogEnd]);
 
     const saveSettings = async (patch: Partial<AuthSettings>, successText = "设置已保存") => {
         setSettingsLoading(true);
@@ -161,6 +187,36 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
         } finally {
             setBackupLoading(false);
         }
+    };
+
+    const chooseBackupFile = () => {
+        backupInputRef.current?.click();
+    };
+
+    const importBackupFile = (file: File) => {
+        modal.confirm({
+            title: "导入数据库备份？",
+            content: "导入会用备份文件覆盖服务端用户数据库、公共提示词和生成日志中包含的数据。系统会先在服务器保留当前数据快照，导入后页面会自动刷新。",
+            okText: "导入",
+            cancelText: "取消",
+            okButtonProps: { danger: true },
+            onOk: async () => {
+                setBackupImporting(true);
+                try {
+                    const formData = new FormData();
+                    formData.append("file", file);
+                    const response = await fetch("/api/admin/backup", { method: "POST", body: formData });
+                    const payload = (await response.json().catch(() => null)) as { imported?: string[]; error?: string } | null;
+                    if (!response.ok) throw new Error(payload?.error || "导入数据库失败");
+                    message.success(`数据库导入完成：${(payload?.imported || []).join("、") || "已导入"}`);
+                    window.setTimeout(() => window.location.reload(), 800);
+                } catch (error) {
+                    message.error(error instanceof Error ? error.message : "导入数据库失败");
+                } finally {
+                    setBackupImporting(false);
+                }
+            },
+        });
     };
 
     const updateUser = async (userId: string, patch: Partial<Pick<PublicUser, "displayName" | "email" | "role" | "status" | "pointsBalance">> & { password?: string }) => {
@@ -360,6 +416,66 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
         } finally {
             if (requestId === promptRequestIdRef.current) setPromptsLoading(false);
         }
+    };
+
+    const loadGenerationLogs = async (page = generationLogPage) => {
+        const requestId = generationLogRequestIdRef.current + 1;
+        generationLogRequestIdRef.current = requestId;
+        setGenerationLogsLoading(true);
+        try {
+            const params = new URLSearchParams({ page: String(page), pageSize: String(GENERATION_LOG_PAGE_SIZE) });
+            if (generationLogSearch.trim()) params.set("keyword", generationLogSearch.trim());
+            if (generationLogKind) params.set("kind", generationLogKind);
+            if (generationLogSource) params.set("source", generationLogSource);
+            if (generationLogStatus) params.set("status", generationLogStatus);
+            if (generationLogUserId) params.set("userId", generationLogUserId);
+            if (generationLogStart) params.set("start", generationLogStart);
+            if (generationLogEnd) params.set("end", generationLogEnd);
+            const response = await fetch(`/api/admin/generation-logs?${params.toString()}`, { cache: "no-store" });
+            const payload = (await response.json()) as { logs?: StoredGenerationLog[]; total?: number; error?: string };
+            if (!response.ok || !payload.logs) throw new Error(payload.error || "加载生成日志失败");
+            if (requestId !== generationLogRequestIdRef.current) return;
+            setGenerationLogs(payload.logs);
+            setGenerationLogTotal(Number(payload.total ?? payload.logs.length));
+            setSelectedGenerationLogIds((ids) => ids.filter((id) => payload.logs!.some((log) => log.id === id)));
+        } catch (error) {
+            if (requestId === generationLogRequestIdRef.current) message.error(error instanceof Error ? error.message : "加载生成日志失败");
+        } finally {
+            if (requestId === generationLogRequestIdRef.current) setGenerationLogsLoading(false);
+        }
+    };
+
+    const deleteGenerationLogsByIds = async (ids: string[]) => {
+        const deletingIds = Array.from(new Set(ids)).filter(Boolean);
+        if (!deletingIds.length) return;
+        setBulkDeletingGenerationLogs(true);
+        try {
+            const response = await fetch("/api/admin/generation-logs", {
+                method: "DELETE",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ ids: deletingIds }),
+            });
+            const payload = (await response.json()) as { deleted?: number; error?: string };
+            if (!response.ok) throw new Error(payload.error || "删除生成日志失败");
+            setSelectedGenerationLogIds((current) => current.filter((id) => !deletingIds.includes(id)));
+            void loadGenerationLogs();
+            message.success(`已删除 ${payload.deleted ?? deletingIds.length} 条生成日志`);
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "删除生成日志失败");
+        } finally {
+            setBulkDeletingGenerationLogs(false);
+        }
+    };
+
+    const resetGenerationLogFilters = () => {
+        setGenerationLogSearch("");
+        setGenerationLogKind("");
+        setGenerationLogSource("");
+        setGenerationLogStatus("");
+        setGenerationLogUserId("");
+        setGenerationLogStart("");
+        setGenerationLogEnd("");
+        setGenerationLogPage(1);
     };
 
     const updateChannel = (id: string, patch: Partial<SystemModelChannel>) => {
@@ -666,6 +782,90 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
             ),
         },
     ];
+    const generationLogColumns: TableColumnsType<StoredGenerationLog> = [
+        {
+            title: "时间",
+            dataIndex: "createdAt",
+            width: 170,
+            render: (value) => <span className="text-sm text-stone-700 dark:text-stone-200">{formatAdminLogTime(String(value))}</span>,
+        },
+        {
+            title: "类型",
+            dataIndex: "kind",
+            width: 92,
+            render: (_, record) => (
+                <Tag className="m-0" color={record.kind === "video" ? "purple" : "blue"}>
+                    {generationKindLabel(record.kind)}
+                </Tag>
+            ),
+        },
+        {
+            title: "用户",
+            width: 150,
+            render: (_, record) => (
+                <div className="min-w-0">
+                    <div className="truncate text-sm font-medium text-stone-900 dark:text-stone-100">{record.displayName || record.username}</div>
+                    <div className="truncate text-xs text-stone-500 dark:text-stone-400">@{record.username || "unknown"}</div>
+                </div>
+            ),
+        },
+        {
+            title: "入口",
+            dataIndex: "source",
+            width: 120,
+            render: (value) => <span className="text-sm text-stone-600 dark:text-stone-300">{generationSourceLabel(String(value))}</span>,
+        },
+        {
+            title: "模型",
+            dataIndex: "model",
+            width: 160,
+            render: (value) => <span className="line-clamp-1 text-sm text-stone-600 dark:text-stone-300">{String(value || "-")}</span>,
+        },
+        {
+            title: "耗时",
+            dataIndex: "durationMs",
+            width: 90,
+            render: (value) => <span className="text-sm tabular-nums text-stone-700 dark:text-stone-200">{formatAdminLogDuration(Number(value) || 0)}</span>,
+        },
+        {
+            title: "状态",
+            dataIndex: "status",
+            width: 92,
+            render: (_, record) => <span className={generationStatusClass(record.status)}>{generationStatusLabel(record.status)}</span>,
+        },
+        {
+            title: "结果",
+            width: 100,
+            render: (_, record) => <GenerationLogAssetPreview log={record} />,
+        },
+        {
+            title: "提示词",
+            dataIndex: "prompt",
+            render: (_, record) => (
+                <div className="min-w-[240px] max-w-xl">
+                    <div className="truncate text-sm font-medium text-stone-900 dark:text-stone-100">{record.title}</div>
+                    <div className="mt-1 line-clamp-2 text-xs leading-5 text-stone-500 dark:text-stone-400">{record.prompt || record.summary}</div>
+                </div>
+            ),
+        },
+        {
+            title: "操作",
+            width: 150,
+            fixed: "right",
+            render: (_, record) => (
+                <Space size="small">
+                    <Button size="small" type="text" icon={<Eye className="size-3.5" />} onClick={() => setViewingGenerationLog(record)}>
+                        详情
+                    </Button>
+                    <Popconfirm title="删除这条生成日志？" okText="删除" cancelText="取消" onConfirm={() => void deleteGenerationLogsByIds([record.id])}>
+                        <Button size="small" type="text" danger icon={<Trash2 className="size-3.5" />}>
+                            删除
+                        </Button>
+                    </Popconfirm>
+                </Space>
+            ),
+        },
+    ];
     const activeSectionInfo = adminSections.find((section) => section.key === activeSection) || adminSections[0];
 
     return (
@@ -691,16 +891,32 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                         <Panel>
                             <PanelHeader
                                 title="数据备份"
-                                description="下载服务端用户数据库与公共提示词备份，适合升级镜像、迁移服务器前留底。"
+                                description="下载或导入服务端用户数据库、公共提示词与生成日志备份，适合升级镜像、迁移服务器前留底。"
                                 actions={
-                                    <Button loading={backupLoading} icon={<Download className="size-4" />} onClick={() => void downloadBackup()}>
-                                        备份用户数据库
-                                    </Button>
+                                    <div className="flex flex-wrap justify-end gap-2">
+                                        <input
+                                            ref={backupInputRef}
+                                            type="file"
+                                            accept="application/json,.json"
+                                            className="hidden"
+                                            onChange={(event) => {
+                                                const file = event.target.files?.[0];
+                                                event.currentTarget.value = "";
+                                                if (file) importBackupFile(file);
+                                            }}
+                                        />
+                                        <Button loading={backupImporting} icon={<Upload className="size-4" />} onClick={chooseBackupFile}>
+                                            导入数据库
+                                        </Button>
+                                        <Button loading={backupLoading} icon={<Download className="size-4" />} onClick={() => void downloadBackup()}>
+                                            备份用户数据库
+                                        </Button>
+                                    </div>
                                 }
                             />
                             <div className="grid gap-3 p-4 text-sm leading-6 text-stone-500 sm:grid-cols-2 sm:p-5 dark:text-stone-400">
                                 <div className="rounded-lg border border-stone-200 bg-stone-50/70 p-4 dark:border-stone-800 dark:bg-stone-900/40">备份包含 `.data/auth.json`，也就是账号、密码哈希、角色、额度、签到和网站设置。</div>
-                                <div className="rounded-lg border border-stone-200 bg-stone-50/70 p-4 dark:border-stone-800 dark:bg-stone-900/40">备份同时包含 `.data/prompts.json`，用于保留管理员公共提示词库。</div>
+                                <div className="rounded-lg border border-stone-200 bg-stone-50/70 p-4 dark:border-stone-800 dark:bg-stone-900/40">导入会先把当前数据快照保存到 `.data/restore-backups`，再恢复备份里的 `.data/prompts.json` 与 `.data/generation-logs.json` 等内容。</div>
                             </div>
                         </Panel>
                     </div>
@@ -1082,6 +1298,157 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                     </Panel>
                 ) : null}
 
+                {activeSection === "logs" ? (
+                    <Panel>
+                        <PanelHeader title="生成日志" description="查看所有用户通过画布、图片工作台和视频创作台产生的图片/视频生成记录。" />
+                        <div className="space-y-4 p-4 sm:p-5">
+                            <div className="flex min-w-0 flex-wrap gap-3">
+                                <Input
+                                    allowClear
+                                    className="min-w-0"
+                                    style={{ flex: "1 1 260px", maxWidth: 380, minWidth: 0 }}
+                                    prefix={<Search className="size-4 text-stone-400" />}
+                                    placeholder="搜索用户、提示词、模型或简述"
+                                    value={generationLogSearch}
+                                    onChange={(event) => {
+                                        setGenerationLogSearch(event.target.value);
+                                        setGenerationLogPage(1);
+                                    }}
+                                />
+                                <Select
+                                    allowClear
+                                    className="min-w-0"
+                                    style={{ flex: "1 1 120px", maxWidth: 150, minWidth: 0 }}
+                                    placeholder="类型"
+                                    value={generationLogKind || undefined}
+                                    onChange={(value) => {
+                                        setGenerationLogKind(value || "");
+                                        setGenerationLogPage(1);
+                                    }}
+                                    options={[
+                                        { label: "图片", value: "image" },
+                                        { label: "视频", value: "video" },
+                                    ]}
+                                />
+                                <Select
+                                    allowClear
+                                    className="min-w-0"
+                                    style={{ flex: "1 1 120px", maxWidth: 150, minWidth: 0 }}
+                                    placeholder="入口"
+                                    value={generationLogSource || undefined}
+                                    onChange={(value) => {
+                                        setGenerationLogSource(value || "");
+                                        setGenerationLogPage(1);
+                                    }}
+                                    options={[
+                                        { label: "画布", value: "canvas" },
+                                        { label: "生图工作台", value: "image-workbench" },
+                                        { label: "视频创作台", value: "video-workbench" },
+                                    ]}
+                                />
+                                <Select
+                                    allowClear
+                                    className="min-w-0"
+                                    style={{ flex: "1 1 120px", maxWidth: 150, minWidth: 0 }}
+                                    placeholder="状态"
+                                    value={generationLogStatus || undefined}
+                                    onChange={(value) => {
+                                        setGenerationLogStatus(value || "");
+                                        setGenerationLogPage(1);
+                                    }}
+                                    options={[
+                                        { label: "成功", value: "success" },
+                                        { label: "失败", value: "failed" },
+                                        { label: "生成中", value: "pending" },
+                                    ]}
+                                />
+                                <Select
+                                    allowClear
+                                    className="min-w-0"
+                                    style={{ flex: "1 1 160px", maxWidth: 220, minWidth: 0 }}
+                                    showSearch
+                                    placeholder="用户"
+                                    value={generationLogUserId || undefined}
+                                    optionFilterProp="label"
+                                    onChange={(value) => {
+                                        setGenerationLogUserId(value || "");
+                                        setGenerationLogPage(1);
+                                    }}
+                                    options={users.map((user) => ({ label: `${user.displayName} / ${user.username}`, value: user.id }))}
+                                />
+                                <DatePicker.RangePicker
+                                    className="min-w-0 max-w-full"
+                                    style={{ flex: "1 1 280px", maxWidth: 360, minWidth: 0 }}
+                                    allowClear
+                                    format="YYYY-MM-DD"
+                                    placeholder={["开始日期", "结束日期"]}
+                                    value={generationLogStart || generationLogEnd ? [generationLogStart ? dayjs(generationLogStart) : null, generationLogEnd ? dayjs(generationLogEnd) : null] : null}
+                                    onChange={(_, dateStrings) => {
+                                        setGenerationLogStart(dateStrings[0] || "");
+                                        setGenerationLogEnd(dateStrings[1] || "");
+                                        setGenerationLogPage(1);
+                                    }}
+                                />
+                            </div>
+                            <div className="flex flex-col gap-3 rounded-lg border border-stone-200 bg-stone-50/70 px-3 py-3 dark:border-stone-800 dark:bg-stone-900/40 sm:flex-row sm:items-center sm:justify-between">
+                                <div className="flex flex-wrap items-center gap-2 text-sm text-stone-500 dark:text-stone-400">
+                                    <span>共 {generationLogTotal} 条</span>
+                                    <span>已选 {selectedGenerationLogs.length} 条</span>
+                                </div>
+                                <div className="flex flex-wrap justify-end gap-2">
+                                    <Button icon={<RefreshCw className="size-4" />} loading={generationLogsLoading} onClick={() => void loadGenerationLogs()}>
+                                        刷新
+                                    </Button>
+                                    <Button disabled={!generationLogs.length} onClick={() => setSelectedGenerationLogIds(generationLogs.map((log) => log.id))}>
+                                        本页全选
+                                    </Button>
+                                    <Button onClick={resetGenerationLogFilters}>清除筛选</Button>
+                                    <Popconfirm title="删除选中的生成日志？" description="只删除后台日志和本地日志预览资源，不会删除用户账号或提示词库。" okText="删除" cancelText="取消" onConfirm={() => void deleteGenerationLogsByIds(selectedGenerationLogIds)}>
+                                        <Button danger disabled={!selectedGenerationLogIds.length} loading={bulkDeletingGenerationLogs} icon={<Trash2 className="size-4" />}>
+                                            删除所选
+                                        </Button>
+                                    </Popconfirm>
+                                </div>
+                            </div>
+                            <div className="space-y-3 md:hidden">
+                                {generationLogs.map((log) => (
+                                    <GenerationLogMobileCard
+                                        key={log.id}
+                                        log={log}
+                                        selected={selectedGenerationLogIds.includes(log.id)}
+                                        onSelectedChange={(checked) => setSelectedGenerationLogIds((ids) => (checked ? Array.from(new Set([...ids, log.id])) : ids.filter((id) => id !== log.id)))}
+                                        onView={() => setViewingGenerationLog(log)}
+                                        onDelete={() => void deleteGenerationLogsByIds([log.id])}
+                                    />
+                                ))}
+                                {!generationLogs.length && !generationLogsLoading ? <div className="rounded-lg border border-dashed border-stone-300 py-12 text-center text-sm text-stone-500 dark:border-stone-700">暂无生成日志</div> : null}
+                            </div>
+                            <div className="hidden md:block">
+                                <Table
+                                    rowKey="id"
+                                    columns={generationLogColumns}
+                                    dataSource={generationLogs}
+                                    loading={generationLogsLoading}
+                                    pagination={{
+                                        current: generationLogPage,
+                                        pageSize: GENERATION_LOG_PAGE_SIZE,
+                                        total: generationLogTotal,
+                                        showSizeChanger: false,
+                                        showTotal: (total, range) => `${range[0]}-${range[1]} / ${total} 条`,
+                                        onChange: (page) => setGenerationLogPage(page),
+                                    }}
+                                    rowSelection={{
+                                        selectedRowKeys: selectedGenerationLogIds,
+                                        onChange: (keys) => setSelectedGenerationLogIds(keys.map(String)),
+                                    }}
+                                    scroll={{ x: 1320 }}
+                                    size="middle"
+                                />
+                            </div>
+                        </div>
+                    </Panel>
+                ) : null}
+
                 {activeSection === "prompts" ? (
                     <Panel>
                         <PanelHeader title="公共提示词库" description="这里新增的提示词会出现在用户端“提示词库”；旧的外部仓库提示词已不再加载。" />
@@ -1287,6 +1654,9 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                     </Form.Item>
                 </Form>
             </Modal>
+            <Modal title="生成日志详情" open={Boolean(viewingGenerationLog)} footer={null} onCancel={() => setViewingGenerationLog(null)} width={860}>
+                {viewingGenerationLog ? <GenerationLogDetail log={viewingGenerationLog} /> : null}
+            </Modal>
             <input
                 ref={logoInputRef}
                 type="file"
@@ -1303,6 +1673,101 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
 
 function Panel({ children }: { children: ReactNode }) {
     return <section className="min-w-0 overflow-hidden rounded-lg border border-stone-200 bg-white shadow-sm shadow-stone-200/40 dark:border-stone-800 dark:bg-stone-950 dark:shadow-black/20">{children}</section>;
+}
+
+function GenerationLogAssetPreview({ log }: { log: StoredGenerationLog }) {
+    const asset = log.assets[0];
+    if (!asset?.url) {
+        return <div className="flex size-12 items-center justify-center rounded-lg border border-stone-200 bg-stone-100 text-stone-400 dark:border-stone-800 dark:bg-stone-900">{log.kind === "video" ? <Film className="size-4" /> : <ImageIcon className="size-4" />}</div>;
+    }
+    if (asset.type === "video") {
+        return (
+            <video className="size-12 rounded-lg border border-stone-200 bg-stone-100 object-cover dark:border-stone-800 dark:bg-stone-900" src={asset.url} muted playsInline preload="metadata" />
+        );
+    }
+    return <img className="size-12 rounded-lg border border-stone-200 bg-stone-100 object-cover dark:border-stone-800 dark:bg-stone-900" src={asset.url} alt="" loading="lazy" referrerPolicy="no-referrer" />;
+}
+
+function GenerationLogMobileCard({ log, selected, onSelectedChange, onView, onDelete }: { log: StoredGenerationLog; selected: boolean; onSelectedChange: (checked: boolean) => void; onView: () => void; onDelete: () => void }) {
+    return (
+        <div className="rounded-lg border border-stone-200 bg-white p-3 dark:border-stone-800 dark:bg-stone-950">
+            <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] gap-3">
+                <Checkbox checked={selected} onChange={(event) => onSelectedChange(event.target.checked)} />
+                <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                        <Tag className="m-0" color={log.kind === "video" ? "purple" : "blue"}>
+                            {generationKindLabel(log.kind)}
+                        </Tag>
+                        <span className={generationStatusClass(log.status)}>{generationStatusLabel(log.status)}</span>
+                        <span className="text-xs text-stone-500">{generationSourceLabel(log.source)}</span>
+                    </div>
+                    <div className="mt-2 truncate text-sm font-semibold text-stone-950 dark:text-stone-100">{log.title}</div>
+                    <div className="mt-1 line-clamp-2 text-xs leading-5 text-stone-500 dark:text-stone-400">{log.prompt || log.summary}</div>
+                    <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-stone-500 dark:text-stone-400">
+                        <span>{formatAdminLogTime(log.createdAt)}</span>
+                        <span>{log.displayName || log.username}</span>
+                        <span>{formatAdminLogDuration(log.durationMs)}</span>
+                    </div>
+                </div>
+                <GenerationLogAssetPreview log={log} />
+            </div>
+            <div className="mt-3 flex justify-end gap-2">
+                <Button size="small" icon={<Eye className="size-3.5" />} onClick={onView}>
+                    详情
+                </Button>
+                <Popconfirm title="删除这条生成日志？" okText="删除" cancelText="取消" onConfirm={onDelete}>
+                    <Button size="small" danger icon={<Trash2 className="size-3.5" />}>
+                        删除
+                    </Button>
+                </Popconfirm>
+            </div>
+        </div>
+    );
+}
+
+function GenerationLogDetail({ log }: { log: StoredGenerationLog }) {
+    const asset = log.assets[0];
+    return (
+        <div className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+                <InfoBox label="用户" value={`${log.displayName || log.username} / ${log.username || "-"}`} />
+                <InfoBox label="入口" value={generationSourceLabel(log.source)} />
+                <InfoBox label="类型" value={generationKindLabel(log.kind)} />
+                <InfoBox label="状态" value={generationStatusLabel(log.status)} />
+                <InfoBox label="时间" value={formatAdminLogTime(log.createdAt)} />
+                <InfoBox label="耗时" value={formatAdminLogDuration(log.durationMs)} />
+                <InfoBox label="模型" value={log.model || "-"} />
+                <InfoBox label="数量" value={`成功 ${log.successCount} / 失败 ${log.failCount} / 共 ${log.count}`} />
+            </div>
+            {asset?.url ? (
+                <div className="rounded-lg border border-stone-200 p-3 dark:border-stone-800">
+                    {asset.type === "video" ? <video className="max-h-[420px] w-full rounded-md bg-black object-contain" src={asset.url} controls playsInline /> : <img className="max-h-[420px] w-full rounded-md bg-stone-100 object-contain dark:bg-stone-900" src={asset.url} alt="" referrerPolicy="no-referrer" />}
+                    <div className="mt-2 break-all text-xs text-stone-500 dark:text-stone-400">{asset.url}</div>
+                </div>
+            ) : null}
+            <div>
+                <div className="mb-1 text-sm font-semibold text-stone-950 dark:text-stone-100">提示词</div>
+                <div className="max-h-48 overflow-y-auto whitespace-pre-wrap rounded-lg border border-stone-200 bg-stone-50 p-3 text-sm leading-6 text-stone-700 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-200">{log.prompt || "-"}</div>
+            </div>
+            {log.error ? (
+                <div>
+                    <div className="mb-1 text-sm font-semibold text-red-600 dark:text-red-300">错误信息</div>
+                    <div className="whitespace-pre-wrap rounded-lg border border-red-200 bg-red-50 p-3 text-sm leading-6 text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200">{log.error}</div>
+                </div>
+            ) : null}
+        </div>
+    );
+}
+
+function InfoBox({ label, value }: { label: string; value: string }) {
+    return (
+        <div className="min-w-0 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 dark:border-stone-800 dark:bg-stone-900">
+            <div className="text-xs text-stone-500 dark:text-stone-400">{label}</div>
+            <div className="mt-1 truncate text-sm font-medium text-stone-900 dark:text-stone-100" title={value}>
+                {value}
+            </div>
+        </div>
+    );
 }
 
 function AdminSectionNav({ activeKey, onChange }: { activeKey: AdminSectionKey; onChange: (key: AdminSectionKey) => void }) {
@@ -1591,6 +2056,42 @@ function clampInteger(value: unknown, min: number, max: number, fallback: number
     return Math.max(min, Math.min(max, numberValue));
 }
 
+function formatAdminLogTime(value: string) {
+    const date = new Date(value);
+    if (!Number.isFinite(date.getTime())) return "-";
+    return date.toLocaleString("zh-CN", { hour12: false });
+}
+
+function formatAdminLogDuration(value: number) {
+    if (!value) return "-";
+    if (value < 1000) return `${Math.round(value)}ms`;
+    return `${(value / 1000).toFixed(2)}s`;
+}
+
+function generationKindLabel(value: string) {
+    return value === "video" ? "视频" : "图片";
+}
+
+function generationSourceLabel(value: string) {
+    if (value === "canvas") return "画布";
+    if (value === "video-workbench") return "视频创作台";
+    if (value === "image-workbench") return "生图工作台";
+    return "未知入口";
+}
+
+function generationStatusLabel(value: string) {
+    if (value === "success") return "成功";
+    if (value === "failed") return "失败";
+    if (value === "pending") return "生成中";
+    return value || "-";
+}
+
+function generationStatusClass(value: string) {
+    if (value === "success") return "inline-flex h-6 items-center rounded-md bg-emerald-50 px-2 text-xs font-medium text-emerald-700 ring-1 ring-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-200 dark:ring-emerald-500/25";
+    if (value === "failed") return "inline-flex h-6 items-center rounded-md bg-rose-50 px-2 text-xs font-medium text-rose-700 ring-1 ring-rose-200 dark:bg-rose-500/15 dark:text-rose-200 dark:ring-rose-500/25";
+    return "inline-flex h-6 items-center rounded-md bg-sky-50 px-2 text-xs font-medium text-sky-700 ring-1 ring-sky-200 dark:bg-sky-500/15 dark:text-sky-200 dark:ring-sky-500/25";
+}
+
 const defaultModelKeys = [
     { key: "imageModel", label: "生图" },
     { key: "videoModel", label: "视频" },
@@ -1603,6 +2104,7 @@ const adminSections: Array<{ key: AdminSectionKey; label: string; description: s
     { key: "site", label: "网站设置", description: "管理前台网站标题、Logo、SEO 标题、描述和关键词。", shortDescription: "品牌与 SEO", icon: <Globe2 className="size-4" /> },
     { key: "settings", label: "系统设置", description: "管理注册策略、签到积分、通用接口和默认模型。", shortDescription: "账号与接口", icon: <SlidersHorizontal className="size-4" /> },
     { key: "users", label: "用户管理", description: "调整用户角色、账号状态和积分余额。", shortDescription: "角色积分", icon: <UsersRound className="size-4" /> },
+    { key: "logs", label: "生成日志", description: "查看用户生成的图片、视频、提示词、入口来源和调用状态。", shortDescription: "创作记录", icon: <Film className="size-4" /> },
     { key: "prompts", label: "提示词库", description: "维护会出现在用户端提示词库里的公共提示词。", shortDescription: "公共内容", icon: <KeyRound className="size-4" /> },
 ];
 

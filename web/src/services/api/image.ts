@@ -83,7 +83,8 @@ type GeminiPayload = {
     promptFeedback?: { blockReason?: string };
 };
 type GeminiStreamState = { buffer: string; text: string; toolCalls: ResponseToolCall[]; error?: string };
-type RequestOptions = { signal?: AbortSignal };
+type GenerationLogSource = "image-workbench" | "video-workbench" | "canvas" | "unknown";
+type RequestOptions = { signal?: AbortSignal; logSource?: GenerationLogSource; logTitle?: string };
 export type ImageGenerationTask = {
     id: string;
     kind: "generation" | "edit";
@@ -677,6 +678,8 @@ export async function createImageGenerationTask(config: AiConfig, prompt: string
             prompt,
             references: taskReferences,
             mask: taskMask,
+            source: options?.logSource || "image-workbench",
+            title: options?.logTitle || "",
         }),
         signal: options?.signal,
     });

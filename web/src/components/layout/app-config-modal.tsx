@@ -273,10 +273,10 @@ export function AppConfigModal() {
                 </div>
             }
             open={isConfigOpen}
-            width={980}
+            width="min(980px, calc(100vw - 24px))"
             centered
             onCancel={() => setConfigDialogOpen(false)}
-            styles={{ body: { maxHeight: "72vh", overflowY: "auto", paddingRight: 12 } }}
+            styles={{ body: { maxHeight: "min(72vh, calc(100dvh - 190px))", overflowX: "hidden", overflowY: "auto", paddingRight: 4 } }}
             footer={
                 <Button type="primary" onClick={finishConfig}>
                     完成
@@ -303,6 +303,7 @@ export function AppConfigModal() {
                 </div>
             ) : null}
             <Tabs
+                className="max-w-full overflow-hidden"
                 activeKey={activeTab}
                 onChange={setActiveTab}
                 items={[
@@ -314,6 +315,8 @@ export function AppConfigModal() {
                                 <div className="mb-4 rounded-lg border border-stone-200 p-3 dark:border-stone-800">
                                     <div className="mb-3 text-sm font-semibold">接口来源</div>
                                     <Segmented
+                                        block
+                                        className="w-full sm:w-auto"
                                         value={config.apiSource}
                                         onChange={(value) => changeApiSource(value as AiConfig["apiSource"])}
                                         options={[
@@ -334,22 +337,26 @@ export function AppConfigModal() {
                                     <SystemChannelSummary channels={systemChannels} />
                                 ) : (
                                     <>
-                                        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-stone-200 p-3 dark:border-stone-800">
-                                            <div className="min-w-0 flex-1">
-                                                <div className="flex w-fit max-w-full flex-wrap items-center gap-1.5 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-900 dark:border-amber-700/60 dark:bg-amber-950/30 dark:text-amber-100">
-                                                    <CircleAlert className="size-3.5 shrink-0" />
-                                                    <span className="font-semibold">重要：</span>
-                                                    <span>新增或拉取模型后，需要到“模型”Tab 选择可选项才会显示。</span>
-                                                    <Button type="link" size="small" className="h-auto p-0 text-xs font-semibold text-amber-900 dark:text-amber-100" onClick={() => setActiveTab("models")}>
-                                                        去模型设置
-                                                    </Button>
+                                        <div className="mb-4 space-y-3 rounded-lg border border-stone-200 p-3 dark:border-stone-800">
+                                            <div className="flex flex-col gap-2.5 rounded-md border border-amber-200 bg-amber-50/80 px-3 py-2.5 text-amber-950 dark:border-amber-500/25 dark:bg-amber-500/10 dark:text-amber-100 sm:flex-row sm:items-center sm:justify-between">
+                                                <div className="flex min-w-0 items-start gap-2.5">
+                                                    <span className="mt-0.5 inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-700 dark:bg-amber-400/15 dark:text-amber-200">
+                                                        <CircleAlert className="size-3.5" />
+                                                    </span>
+                                                    <div className="min-w-0">
+                                                        <div className="text-xs font-semibold leading-5">模型显示提醒</div>
+                                                        <div className="mt-0.5 text-xs leading-5 text-amber-900/80 dark:text-amber-100/75">新增或拉取模型后，需要到“模型”Tab 选择可选项才会显示。</div>
+                                                    </div>
                                                 </div>
+                                                <Button size="small" className="shrink-0 border-amber-300 bg-white/75 text-amber-900 hover:!border-amber-400 hover:!text-amber-950 dark:border-amber-400/35 dark:bg-white/10 dark:text-amber-100 dark:hover:!border-amber-300 dark:hover:!text-amber-50" onClick={() => setActiveTab("models")}>
+                                                    去模型设置
+                                                </Button>
                                             </div>
-                                            <div className="flex shrink-0 gap-2">
-                                                <Button icon={<RefreshCw className="size-4" />} loading={Boolean(loadingChannelId)} onClick={() => void refreshAllModels()}>
+                                            <div className="grid grid-cols-2 gap-2 sm:flex sm:justify-end">
+                                                <Button className="min-w-0" icon={<RefreshCw className="size-4" />} loading={Boolean(loadingChannelId)} onClick={() => void refreshAllModels()}>
                                                     拉取全部
                                                 </Button>
-                                                <Button type="primary" icon={<Plus className="size-4" />} onClick={addChannel}>
+                                                <Button className="min-w-0" type="primary" icon={<Plus className="size-4" />} onClick={addChannel}>
                                                     新增渠道
                                                 </Button>
                                             </div>
@@ -357,12 +364,12 @@ export function AppConfigModal() {
                                         <div className="space-y-3">
                                             {config.channels.map((channel) => (
                                                 <section key={channel.id} className="rounded-lg border border-stone-200 p-3 dark:border-stone-800">
-                                                    <div className="mb-3 flex items-center justify-between gap-3">
+                                                    <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                                                         <div className="min-w-0">
                                                             <div className="truncate text-sm font-semibold">{channel.name || "未命名渠道"}</div>
                                                             <div className="mt-1 text-xs text-stone-500">已保存 {channel.models.length} 个模型</div>
                                                         </div>
-                                                        <div className="flex shrink-0 gap-2">
+                                                        <div className="flex shrink-0 justify-end gap-2">
                                                             <Button size="small" loading={loadingChannelId === channel.id} onClick={() => void refreshChannelModels(channel)}>
                                                                 拉取模型
                                                             </Button>

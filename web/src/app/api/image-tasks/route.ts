@@ -4,6 +4,7 @@ import { getCurrentUser } from "@/lib/auth/session";
 import { getAuthSettings } from "@/lib/auth/store";
 import { configureServerProxyDispatcher } from "@/lib/server/proxy-dispatcher";
 import { countActiveImageTasksForUser, createImageTask, updateImageTask, type ImageTask, type ImageTaskConfig, type ImageTaskReference } from "@/lib/server/image-task-store";
+import { isGenerationSource, recordGenerationLog } from "@/lib/server/generation-log-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,6 +17,8 @@ type CreateImageTaskBody = {
     prompt?: string;
     references?: ImageTaskReference[];
     mask?: ImageTaskReference;
+    source?: string;
+    title?: string;
 };
 
 type ImageApiResponse = {
@@ -74,7 +77,11 @@ export async function POST(request: Request) {
 
     const task = createImageTask({
         userId: currentUser.id,
+        username: currentUser.username,
+        displayName: currentUser.displayName,
         kind,
+        source: isGenerationSource(body.source) ? body.source : "image-workbench",
+        title: typeof body.title === "string" ? body.title : "",
         config,
         prompt,
         references: Array.isArray(body.references) ? body.references.filter((item) => Boolean(item?.dataUrl)) : [],
@@ -92,9 +99,37 @@ async function runImageTask(task: ImageTask, origin: string, cookie: string) {
     try {
         const result = task.config.apiFormat === "gemini" ? await runGeminiImageTask(task, origin, cookie) : await runOpenAiImageTask(task, origin, cookie);
         updateImageTask(task.id, { status: "success", result: { dataUrl: result.dataUrl }, pointsRemaining: result.pointsRemaining });
+        await writeImageGenerationLog(task, "success", result.dataUrl, Date.now() - task.createdAt);
     } catch (error) {
-        updateImageTask(task.id, { status: "error", error: error instanceof Error ? error.message : "图片生成失败" });
+        const message = error instanceof Error ? error.message : "图片生成失败";
+        updateImageTask(task.id, { status: "error", error: message });
+        await writeImageGenerationLog(task, "failed", "", Date.now() - task.createdAt, message);
     }
+}
+
+async function writeImageGenerationLog(task: ImageTask, status: "success" | "failed", resultUrl: string, durationMs: number, error?: string) {
+    await recordGenerationLog({
+        id: `image-task:${task.id}`,
+        taskId: task.id,
+        userId: task.userId,
+        username: task.username,
+        displayName: task.displayName,
+        kind: "image",
+        source: task.source || "image-workbench",
+        status,
+        title: task.title || task.prompt.slice(0, 36) || "图片生成",
+        prompt: task.prompt,
+        model: task.config.model,
+        summary: status === "success" ? (task.kind === "edit" ? "图生图调用完成" : "文生图调用完成") : "图片生成失败",
+        durationMs,
+        count: 1,
+        successCount: status === "success" ? 1 : 0,
+        failCount: status === "failed" ? 1 : 0,
+        assets: resultUrl ? [{ type: "image", url: resultUrl }] : [],
+        error,
+        createdAt: task.createdAt,
+        completedAt: Date.now(),
+    });
 }
 
 async function runOpenAiImageTask(task: ImageTask, origin: string, cookie: string) {

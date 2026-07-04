@@ -18,6 +18,7 @@ import { APP_STORAGE_NAME, LEGACY_APP_STORAGE_NAME } from "@/lib/storage-keys";
 import { boolConfig, isSeedanceVideoConfig, normalizeSeedanceRatio, seedanceReferenceLabel, seedanceVideoReferenceError, seedanceVideoReferenceHint, SEEDANCE_REFERENCE_LIMITS } from "@/lib/seedance-video";
 import { deleteStoredMedia, resolveMediaUrl, uploadMediaFile } from "@/services/file-storage";
 import { resolveImageUrl, uploadImage } from "@/services/image-storage";
+import { recordGenerationLog } from "@/services/api/generation-logs";
 import { createVideoGenerationTask, pollVideoGenerationTask, storeGeneratedVideo, type VideoGenerationTask } from "@/services/api/video";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
@@ -268,6 +269,7 @@ export default function VideoPage() {
             setPreviewLog(failedLog);
             setResults([{ id: failedLog.id, status: "failed", error: errorMessage }]);
             await saveLog(failedLog);
+            void recordVideoGenerationLog(failedLog);
             message.error(errorMessage);
             startQueuedVideoLogs();
         }
@@ -426,6 +428,7 @@ export default function VideoPage() {
                     const nextLog = { ...(getLatestLog(log.id) || log), status: "成功" as const, durationMs: nextVideo.durationMs, video: nextVideo, task: undefined, error: undefined, resultDeleted: false };
                     if (activeLogIdRef.current === log.id) setResults([{ id: nextVideo.id, status: "success", video: nextVideo }]);
                     await saveLog(nextLog);
+                    void recordVideoGenerationLog(nextLog);
                     message.success("视频已生成");
                     return;
                 }
@@ -439,6 +442,7 @@ export default function VideoPage() {
             const nextLog = { ...(getLatestLog(log.id) || log), status: "失败" as const, durationMs: Date.now() - log.createdAt, task: undefined, error: errorMessage, resultDeleted: false };
             if (activeLogIdRef.current === log.id) setResults([{ id: log.id, status: "failed", error: errorMessage }]);
             await saveLog(nextLog);
+            void recordVideoGenerationLog(nextLog);
             message.error(errorMessage);
         } finally {
             activeLogIdsRef.current.delete(log.id);
@@ -728,17 +732,19 @@ export default function VideoPage() {
                     event.target.value = "";
                 }}
             />
-            <Drawer title="生成记录" placement="bottom" size="large" open={logsOpen} onClose={() => setLogsOpen(false)}>
-                <LogPanel
-                    logs={logs}
-                    selectedLogIds={selectedLogIds}
-                    activeLogId={previewLog?.id}
-                    onSelectedLogIdsChange={setSelectedLogIds}
-                    onCreateSession={createSession}
-                    onDeleteSelected={() => setDeleteConfirmOpen(true)}
-                    onPreviewLog={previewGenerationLog}
-                    onRenameLog={(log, title) => void renameGenerationLog(log, title)}
-                />
+            <Drawer title="生成记录" placement="bottom" height="min(86dvh, 720px)" open={logsOpen} onClose={() => setLogsOpen(false)} styles={{ body: { padding: 0, overflow: "hidden" } }}>
+                <div className="thin-scrollbar h-full overflow-y-auto px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-4">
+                    <LogPanel
+                        logs={logs}
+                        selectedLogIds={selectedLogIds}
+                        activeLogId={previewLog?.id}
+                        onSelectedLogIdsChange={setSelectedLogIds}
+                        onCreateSession={createSession}
+                        onDeleteSelected={() => setDeleteConfirmOpen(true)}
+                        onPreviewLog={previewGenerationLog}
+                        onRenameLog={(log, title) => void renameGenerationLog(log, title)}
+                    />
+                </div>
             </Drawer>
             <Drawer title="参数" placement="bottom" size="82vh" open={settingsOpen} onClose={() => setSettingsOpen(false)}>
                 <div className="grid grid-cols-2 gap-3 pb-4">
@@ -1006,6 +1012,39 @@ async function readStoredLogs() {
     } catch {
         return [];
     }
+}
+
+async function recordVideoGenerationLog(log: GenerationLog) {
+    await recordGenerationLog({
+        id: `video-workbench:${log.id}`,
+        kind: "video",
+        source: "video-workbench",
+        status: log.status === "成功" ? "success" : log.status === "失败" ? "failed" : "pending",
+        title: log.title,
+        prompt: log.prompt,
+        model: log.model || log.config.videoModel || log.config.model,
+        summary: log.status === "成功" ? "视频生成完成" : log.status === "失败" ? "视频生成失败" : "视频生成中",
+        durationMs: log.durationMs,
+        count: 1,
+        successCount: log.status === "成功" ? 1 : 0,
+        failCount: log.status === "失败" ? 1 : 0,
+        assets:
+            log.video?.url && !log.video.url.startsWith("blob:")
+                ? [
+                      {
+                          type: "video",
+                          url: log.video.url,
+                          mimeType: log.video.mimeType,
+                          width: log.video.width,
+                          height: log.video.height,
+                          bytes: log.video.bytes,
+                      },
+                  ]
+                : [],
+        error: log.error,
+        createdAt: log.createdAt,
+        completedAt: Date.now(),
+    }).catch(() => undefined);
 }
 
 async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog> {

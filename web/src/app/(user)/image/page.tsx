@@ -110,6 +110,7 @@ export default function ImagePage() {
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
     const [selectedLogIds, setSelectedLogIds] = useState<string[]>([]);
     const [selectedResultIds, setSelectedResultIds] = useState<string[]>([]);
+    const [missingResultIds, setMissingResultIds] = useState<string[]>([]);
     const [previewLog, setPreviewLog] = useState<GenerationLog | null>(null);
     const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
     const resultsByLogIdRef = useRef(new Map<string, GenerationResult[]>());
@@ -138,6 +139,11 @@ export default function ImagePage() {
         imageConcurrencyLimitRef.current = imageConcurrencyLimit;
         startQueuedImageTasks();
     }, [imageConcurrencyLimit]);
+
+    useEffect(() => {
+        const visibleIds = new Set(results.map((result) => result.id));
+        setMissingResultIds((ids) => ids.filter((id) => visibleIds.has(id)));
+    }, [results]);
 
     useEffect(() => {
         return () => {
@@ -378,6 +384,7 @@ export default function ImagePage() {
         const logId = pendingLog.id;
 
         setSelectedResultIds([]);
+        setMissingResultIds([]);
         activeLogIdRef.current = logId;
         setPreviewLog(pendingLog);
         setLogResults(logId, startedResults);
@@ -501,7 +508,8 @@ export default function ImagePage() {
     const runGenerationSlot = async (logId: string, resultId: string, index: number, snapshot: GenerationSnapshot, batchStartedAt: number, baseDurationMs: number) => {
         const itemStartedAt = Date.now();
         try {
-            const task = await createImageGenerationTask(snapshot.config, snapshot.text, snapshot.references);
+            const latestTitle = getLatestLog(logId)?.title || snapshot.text.slice(0, 36) || "生图工作台";
+            const task = await createImageGenerationTask(snapshot.config, snapshot.text, snapshot.references, undefined, { logSource: "image-workbench", logTitle: latestTitle });
             const pendingTask: PendingImageTask = { resultId, taskId: task.id, kind: task.kind, model: task.model, index, startedAt: itemStartedAt };
             const controllerKey = `${logId}:${resultId}:${task.id}`;
             const controller = new AbortController();
@@ -535,6 +543,7 @@ export default function ImagePage() {
     const currentResultIds = results.map((result) => result.id);
     const selectedVisibleResultIds = selectedResultIds.filter((id) => currentResultIds.includes(id));
     const allResultsSelected = Boolean(results.length) && selectedVisibleResultIds.length === results.length;
+    const missingVisibleResultIds = results.filter((result) => result.status === "success" && result.image && (!result.image.dataUrl || missingResultIds.includes(result.id))).map((result) => result.id);
 
     const toggleAllResults = () => {
         setSelectedResultIds(allResultsSelected ? [] : currentResultIds);
@@ -544,10 +553,14 @@ export default function ImagePage() {
         setSelectedResultIds((value) => (checked ? Array.from(new Set([...value, id])) : value.filter((item) => item !== id)));
     };
 
-    const deleteSelectedResults = async () => {
+    const markResultMissing = (id: string) => {
+        setMissingResultIds((ids) => (ids.includes(id) ? ids : [...ids, id]));
+    };
+
+    const deleteResultsByIds = async (ids: string[], successText?: string) => {
         const currentLog = previewLog ? getLatestLog(previewLog.id) || previewLog : null;
-        if (!currentLog || !selectedVisibleResultIds.length) return;
-        const selectedIds = new Set(selectedVisibleResultIds);
+        if (!currentLog || !ids.length) return;
+        const selectedIds = new Set(ids);
         const currentResults = getLogResults(currentLog);
         const removedResults = currentResults.filter((result) => selectedIds.has(result.id));
         const nextResults = currentResults.filter((result) => !selectedIds.has(result.id));
@@ -562,9 +575,18 @@ export default function ImagePage() {
         const snapshot = snapshotFromLog(currentLog, effectiveConfig);
         const nextLog = buildLogFromResults(currentLog, snapshot, nextResults, currentLog.durationMs || 0, String(nextResults.length));
         setLogResults(currentLog.id, nextResults);
-        setSelectedResultIds([]);
+        setSelectedResultIds((value) => value.filter((id) => !selectedIds.has(id)));
+        setMissingResultIds((value) => value.filter((id) => !selectedIds.has(id)));
         await Promise.all([deleteStoredImages(storageKeys), saveLog(nextLog)]);
-        message.success(`已删除 ${removedResults.length} 个结果`);
+        message.success(successText || `已删除 ${removedResults.length} 个结果`);
+    };
+
+    const deleteSelectedResults = async () => {
+        await deleteResultsByIds(selectedVisibleResultIds);
+    };
+
+    const deleteMissingResults = async () => {
+        await deleteResultsByIds(missingVisibleResultIds, `已清理 ${missingVisibleResultIds.length} 个丢失图片`);
     };
 
     const renameGenerationLog = async (log: GenerationLog, title: string) => {
@@ -705,17 +727,22 @@ export default function ImagePage() {
                                         <Button size="small" danger icon={<Trash2 className="size-3.5" />} disabled={!selectedVisibleResultIds.length} onClick={() => void deleteSelectedResults()}>
                                             删除{selectedVisibleResultIds.length ? ` ${selectedVisibleResultIds.length}` : ""}
                                         </Button>
+                                        {missingVisibleResultIds.length ? (
+                                            <Button size="small" icon={<Trash2 className="size-3.5" />} onClick={() => void deleteMissingResults()}>
+                                                清理丢失 {missingVisibleResultIds.length}
+                                            </Button>
+                                        ) : null}
                                     </>
                                 ) : null}
-                                {previewPendingCount ? <Tag className="m-0 px-2 py-1" color="processing">生成中 {previewPendingCount}</Tag> : null}
-                                {activeImageTasks ? <Tag className="m-0 px-2 py-1">运行 {activeImageTasks}/{imageConcurrencyLimit}</Tag> : null}
+                                {previewPendingCount ? <span className="inline-flex h-7 items-center rounded-md bg-sky-50 px-2 text-xs font-medium text-sky-700 ring-1 ring-sky-200 dark:bg-sky-500/15 dark:text-sky-200 dark:ring-sky-500/25">生成中 {previewPendingCount}</span> : null}
+                                {activeImageTasks ? <span className="inline-flex h-7 items-center rounded-md bg-stone-100 px-2 text-xs font-medium text-stone-700 ring-1 ring-stone-200 dark:bg-white/10 dark:text-stone-200 dark:ring-white/10">运行 {activeImageTasks}/{imageConcurrencyLimit}</span> : null}
                             </div>
                         </div>
                         {results.length ? (
                             <div className={results.length === 1 ? "grid max-w-[360px] gap-4" : "grid w-full grid-cols-1 gap-4 sm:grid-cols-2 2xl:grid-cols-3"}>
                                 {results.map((result, index) =>
                                     result.status === "success" && result.image ? (
-                                        <ResultImageCard key={result.id} image={result.image} index={index} large={results.length === 1} selected={selectedResultIds.includes(result.id)} onSelectedChange={(checked) => toggleResultSelected(result.id, checked)} onEdit={addResultToReferences} onDownload={downloadImage} onSaveAsset={saveResultToAssets} />
+                                        <ResultImageCard key={result.id} image={result.image} index={index} large={results.length === 1} missing={missingResultIds.includes(result.id) || !result.image.dataUrl} selected={selectedResultIds.includes(result.id)} onSelectedChange={(checked) => toggleResultSelected(result.id, checked)} onMissing={() => markResultMissing(result.id)} onEdit={addResultToReferences} onDownload={downloadImage} onSaveAsset={saveResultToAssets} />
                                     ) : result.status === "failed" ? (
                                         <FailedImageCard key={result.id} error={result.error || "生成失败"} large={results.length === 1} selected={selectedResultIds.includes(result.id)} onSelectedChange={(checked) => toggleResultSelected(result.id, checked)} onRetry={() => retryResult(index)} />
                                     ) : (
@@ -743,17 +770,19 @@ export default function ImagePage() {
                     event.target.value = "";
                 }}
             />
-            <Drawer title="生成记录" placement="bottom" size="large" open={logsOpen} onClose={() => setLogsOpen(false)}>
-                <LogPanel
-                    logs={logs}
-                    selectedLogIds={selectedLogIds}
-                    activeLogId={previewLog?.id}
-                    onSelectedLogIdsChange={setSelectedLogIds}
-                    onCreateSession={createSession}
-                    onDeleteSelected={() => setDeleteConfirmOpen(true)}
-                    onPreviewLog={(log) => void previewGenerationLog(log)}
-                    onRenameLog={(log, title) => void renameGenerationLog(log, title)}
-                />
+            <Drawer title="生成记录" placement="bottom" height="min(86dvh, 720px)" open={logsOpen} onClose={() => setLogsOpen(false)} styles={{ body: { padding: 0, overflow: "hidden" } }}>
+                <div className="thin-scrollbar h-full overflow-y-auto px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-4">
+                    <LogPanel
+                        logs={logs}
+                        selectedLogIds={selectedLogIds}
+                        activeLogId={previewLog?.id}
+                        onSelectedLogIdsChange={setSelectedLogIds}
+                        onCreateSession={createSession}
+                        onDeleteSelected={() => setDeleteConfirmOpen(true)}
+                        onPreviewLog={(log) => void previewGenerationLog(log)}
+                        onRenameLog={(log, title) => void renameGenerationLog(log, title)}
+                    />
+                </div>
             </Drawer>
             <Drawer title="参数" placement="bottom" size="82vh" open={settingsOpen} onClose={() => setSettingsOpen(false)}>
                 <div className="grid grid-cols-2 gap-3 pb-4">
@@ -789,8 +818,10 @@ function ResultImageCard({
     image,
     index,
     large,
+    missing,
     selected,
     onSelectedChange,
+    onMissing,
     onEdit,
     onDownload,
     onSaveAsset,
@@ -798,23 +829,25 @@ function ResultImageCard({
     image: GeneratedImage;
     index: number;
     large?: boolean;
+    missing?: boolean;
     selected?: boolean;
     onSelectedChange?: (checked: boolean) => void;
+    onMissing?: () => void;
     onEdit: (image: GeneratedImage, index: number) => void;
     onDownload: (image: GeneratedImage, index: number) => void;
     onSaveAsset: (image: GeneratedImage, index: number) => void;
 }) {
-    const hasImage = Boolean(image.dataUrl);
+    const hasImage = Boolean(image.dataUrl) && !missing;
     return (
         <div className="relative overflow-hidden rounded-lg border border-stone-200 bg-background dark:border-stone-800">
             <ResultSelectCheckbox selected={selected} onSelectedChange={onSelectedChange} />
             <div className={`${large ? "h-[240px]" : "h-[220px]"} flex w-full items-center justify-center bg-stone-50 dark:bg-stone-950`}>
                 {hasImage ? (
-                    <Image rootClassName="!h-full !w-full" src={image.dataUrl} alt={`生成结果 ${index + 1}`} className="!h-full !w-full object-contain" style={{ objectFit: "contain" }} />
+                    <Image rootClassName="!h-full !w-full" src={image.dataUrl} alt={`生成结果 ${index + 1}`} className="!h-full !w-full object-contain" style={{ objectFit: "contain" }} onError={onMissing} />
                 ) : (
                     <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-4 text-center text-sm text-stone-500 dark:text-stone-400">
                         <ImagePlus className="size-8 text-stone-400" />
-                        <span>本地图片已丢失</span>
+                        <span>图片已丢失</span>
                     </div>
                 )}
             </div>
@@ -850,16 +883,16 @@ function ResultImageCard({
 
 function PendingImageCard({ large, selected, onSelectedChange }: { large?: boolean; selected?: boolean; onSelectedChange?: (checked: boolean) => void }) {
     return (
-        <div className={`relative overflow-hidden rounded-lg border border-dashed border-stone-300 bg-stone-50 dark:border-stone-700 dark:bg-stone-900 ${large ? "h-[240px]" : "h-[220px]"}`}>
+        <div className={`relative overflow-hidden rounded-lg border border-sky-200 bg-sky-50/80 dark:border-sky-500/25 dark:bg-sky-950/20 ${large ? "h-[240px]" : "h-[220px]"}`}>
             <ResultSelectCheckbox selected={selected} onSelectedChange={onSelectedChange} />
             <div
-                className="absolute inset-0 opacity-60"
+                className="absolute inset-0 opacity-70 dark:opacity-40"
                 style={{
-                    backgroundImage: "radial-gradient(circle, rgba(120,113,108,0.35) 1.4px, transparent 1.6px)",
+                    backgroundImage: "linear-gradient(135deg, rgba(14,165,233,0.16) 0, rgba(14,165,233,0.16) 1px, transparent 1px, transparent 12px)",
                     backgroundSize: "16px 16px",
                 }}
             />
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-stone-500 dark:text-stone-400">
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm font-medium text-sky-700 dark:text-sky-200">
                 <LoaderCircle className="size-6 animate-spin" />
                 <span>生成中</span>
             </div>
@@ -1042,27 +1075,29 @@ function LogCard({ log, selected, active, onSelectedChange, onClick, onRename }:
                         ) : null}
                     </div>
                 </div>
-                <div className={`relative ml-6 mt-1 min-h-[74px] rounded-md border border-stone-200/70 bg-white/65 px-2.5 py-2 shadow-sm shadow-stone-200/30 dark:border-stone-800 dark:bg-stone-950/45 dark:shadow-black/10 ${log.pendingCount ? "pr-24" : ""}`}>
-                    <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                        <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none" color="blue">
+                <div className="ml-6 mt-1 min-h-[62px] rounded-md border border-stone-200/70 bg-white/65 px-2.5 py-2 shadow-sm shadow-stone-200/30 dark:border-stone-800 dark:bg-stone-950/45 dark:shadow-black/10">
+                    <div className="flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap">
+                        <span className="inline-flex h-6 shrink-0 items-center rounded-md bg-blue-50 px-1.5 text-xs font-medium leading-none text-blue-700 dark:bg-blue-500/15 dark:text-blue-200">
                             成功 {log.successCount ?? log.imageCount}
-                        </Tag>
+                        </span>
                         {log.failCount ? (
-                            <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none" color="red">
+                            <span className="inline-flex h-6 shrink-0 items-center rounded-md bg-rose-50 px-1.5 text-xs font-medium leading-none text-rose-700 dark:bg-rose-500/15 dark:text-rose-200">
                                 失败 {log.failCount}
-                            </Tag>
+                            </span>
                         ) : null}
-                        <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none">{log.imageCount} 张</Tag>
-                        <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none" color="green">
+                        <span className="inline-flex h-6 shrink-0 items-center rounded-md bg-stone-100 px-1.5 text-xs font-medium leading-none text-stone-700 dark:bg-white/10 dark:text-stone-200">{log.imageCount} 张</span>
+                        <span className="inline-flex h-6 shrink-0 items-center rounded-md bg-lime-50 px-1.5 text-xs font-medium leading-none text-lime-700 dark:bg-lime-500/15 dark:text-lime-200">
                             {formatDuration(log.durationMs)}
-                        </Tag>
+                        </span>
                     </div>
-                    <div className="mt-1.5 truncate text-xs leading-5 text-stone-500 dark:text-stone-400">{log.time}</div>
-                    {log.pendingCount ? (
-                        <Tag className="!absolute bottom-2 right-2 m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none" color="processing">
-                            生成中 {log.pendingCount}
-                        </Tag>
-                    ) : null}
+                    <div className="mt-1.5 flex min-w-0 items-center justify-between gap-2">
+                        <span className="min-w-0 truncate text-xs leading-5 text-stone-500 dark:text-stone-400">{log.time}</span>
+                        {log.pendingCount ? (
+                            <span className="inline-flex h-6 shrink-0 items-center rounded-md bg-sky-50 px-1.5 text-xs font-medium leading-none text-sky-700 ring-1 ring-sky-200 dark:bg-sky-500/15 dark:text-sky-200 dark:ring-sky-500/25">
+                                生成中 {log.pendingCount}
+                            </span>
+                        ) : null}
+                    </div>
                 </div>
             </div>
         </div>

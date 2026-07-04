@@ -71,6 +71,7 @@ migrateLocalStorageKey(CONFIG_STORE_KEY, legacyAppStorageKey("ai_config_store"))
 export type ModelCapability = "image" | "video" | "text" | "audio";
 const CHANNEL_MODEL_SEPARATOR = "::";
 const OPENAI_BASE_URL = "https://api.openai.com";
+const CONFIG_STORE_VERSION = 2;
 
 export const defaultConfig: AiConfig = {
     apiSource: "custom",
@@ -225,7 +226,17 @@ export const useConfigStore = create<ConfigStore>()(
         }),
         {
             name: CONFIG_STORE_KEY,
+            version: CONFIG_STORE_VERSION,
             partialize: (state) => ({ config: state.config, webdav: state.webdav }),
+            migrate: (persisted, version) => {
+                const persistedState = (persisted || {}) as Partial<ConfigStore>;
+                const persistedConfig = (persistedState.config || {}) as Partial<AiConfig>;
+                const config = { ...defaultConfig, ...persistedConfig };
+                if (version < 2 && persistedConfig.canvasImageCount === "3") {
+                    config.canvasImageCount = defaultConfig.canvasImageCount;
+                }
+                return { config, webdav: { ...defaultWebdavSyncConfig, ...(persistedState.webdav || {}) } };
+            },
             merge: (persisted, current) => {
                 const persistedState = (persisted || {}) as Partial<ConfigStore>;
                 const persistedConfig = (persistedState.config || {}) as Partial<AiConfig>;

@@ -9,6 +9,7 @@ import { saveAs } from "file-saver";
 
 import { createImageGenerationTask, requestImageQuestion, waitForImageGenerationTask, type ImageGenerationTask } from "@/services/api/image";
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
+import { recordGenerationLog } from "@/services/api/generation-logs";
 import { createVideoGenerationTask, storeGeneratedVideo, waitForVideoGenerationTask } from "@/services/api/video";
 import { DOCS_URL } from "@/constant/env";
 import { defaultConfig, type AiConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
@@ -420,6 +421,36 @@ function VozebCanvasPage() {
 
     const completeVideoTask = useCallback(async (nodeId: string, generationConfig: AiConfig, task: NonNullable<CanvasNodeMetadata["videoTask"]>, controller: AbortController, prompt?: string) => {
         const video = await storeGeneratedVideo(await waitForVideoGenerationTask(generationConfig, task, { signal: controller.signal }));
+        const finalPrompt = prompt || "";
+        void recordGenerationLog({
+            id: `canvas-video:${task.id || nodeId}`,
+            taskId: task.id,
+            kind: "video",
+            source: "canvas",
+            status: "success",
+            title: finalPrompt.slice(0, 36) || "画布视频",
+            prompt: finalPrompt,
+            model: generationConfig.model || generationConfig.videoModel,
+            summary: "画布视频生成完成",
+            durationMs: video.durationMs,
+            count: 1,
+            successCount: 1,
+            failCount: 0,
+            assets:
+                video.url && !video.url.startsWith("blob:")
+                    ? [
+                          {
+                              type: "video",
+                              url: video.url,
+                              mimeType: video.mimeType,
+                              width: video.width,
+                              height: video.height,
+                              bytes: video.bytes,
+                          },
+                      ]
+                    : [],
+            completedAt: Date.now(),
+        }).catch(() => undefined);
         setNodes((prev) =>
             prev.map((node) => {
                 if (node.id !== nodeId) return node;
@@ -479,7 +510,7 @@ function VozebCanvasPage() {
 
     const startAndCompleteImageTask = useCallback(
         async (nodeId: string, generationConfig: AiConfig, prompt: string, references: ReferenceImage[] = [], mask: ReferenceImage | undefined, controller: AbortController) => {
-            const task = await createImageGenerationTask(generationConfig, prompt, references, mask, { signal: controller.signal });
+            const task = await createImageGenerationTask(generationConfig, prompt, references, mask, { signal: controller.signal, logSource: "canvas", logTitle: prompt.slice(0, 36) || "画布生图" });
             setNodes((prev) =>
                 prev.map((node) =>
                     node.id === nodeId
