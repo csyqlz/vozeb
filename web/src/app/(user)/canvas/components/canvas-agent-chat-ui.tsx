@@ -45,7 +45,7 @@ export function AgentChatMessage({ item, theme, user, onRejectTool, onApproveToo
         );
     }
     return (
-        <div className={`flex items-start gap-3 ${isUser ? "justify-end" : "justify-start"}`}>
+        <div className={`canvas-agent-message flex min-w-0 items-start gap-3 ${isUser ? "justify-end" : "justify-start"}`}>
             {!isUser ? <AgentAvatar theme={theme} /> : null}
             <div className={`min-w-0 max-w-[82%] text-sm leading-6 ${isUser ? "text-right" : "text-left"}`} style={{ color }}>
                 <div className="whitespace-pre-wrap break-words text-left">{item.text}</div>

@@ -143,7 +143,7 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
     };
 
     return (
-        <div className="inline-flex shrink-0 items-center gap-1">
+        <div className={cn("inline-flex shrink-0 items-center gap-1", variant === "canvas" && "canvas-user-status-actions")}>
             {user ? (
                 <Popover
                     open={pointsOpen}
@@ -169,7 +169,7 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
             {user ? (
                 <button
                     type="button"
-                    className={cn(naturalIconClass, user.checkedInToday && "cursor-default opacity-50 hover:text-stone-600 dark:hover:text-stone-300")}
+                    className={cn(naturalIconClass, variant === "canvas" && "canvas-checkin-action", user.checkedInToday && "cursor-default opacity-50 hover:text-stone-600 dark:hover:text-stone-300")}
                     style={iconStyle}
                     disabled={user.checkedInToday || checkingIn}
                     onClick={handleCheckIn}
@@ -180,23 +180,23 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
                 </button>
             ) : null}
             {showConfig ? (
-                <button type="button" className={naturalIconClass} style={iconStyle} onClick={() => openConfigDialog(false)} aria-label="配置" title="配置">
+                <button type="button" className={cn(naturalIconClass, variant === "canvas" && "canvas-config-action")} style={iconStyle} onClick={() => openConfigDialog(false)} aria-label="配置" title="配置">
                     <Settings2 className="size-4" />
                 </button>
             ) : null}
-            <AnimatedThemeToggler theme={theme} onThemeChange={setTheme} className={naturalIconClass} style={iconStyle} aria-label={theme === "dark" ? "切换到浅色主题" : "切换到深色主题"} title={theme === "dark" ? "切换到浅色主题" : "切换到深色主题"} />
+            <AnimatedThemeToggler theme={theme} onThemeChange={setTheme} className={cn(naturalIconClass, variant === "canvas" && "canvas-theme-action")} style={iconStyle} aria-label={theme === "dark" ? "切换到浅色主题" : "切换到深色主题"} title={theme === "dark" ? "切换到浅色主题" : "切换到深色主题"} />
             {showAdminMetaActions ? (
-                <>
+                <span className="canvas-admin-meta-actions inline-flex items-center gap-1">
                     <VersionReleaseModal style={versionStyle} />
                     <GitHubLink className={cn("bg-transparent hover:bg-transparent dark:hover:bg-transparent", gitHubClassName)} style={gitHubStyle} />
-                </>
+                </span>
             ) : null}
             {user ? (
                 <>
                     <Dropdown menu={{ items: accountItems, onClick: handleMenuClick }} trigger={["click"]} placement="bottomRight">
                         <button
                             type="button"
-                            className="ml-1 inline-flex h-8 max-w-[36px] items-center gap-2 rounded-md border border-stone-200 px-2.5 text-sm font-medium text-stone-700 transition hover:border-stone-300 hover:text-stone-950 sm:max-w-40 dark:border-stone-800 dark:text-stone-200 dark:hover:border-stone-700 dark:hover:text-white"
+                            className={cn("ml-1 inline-flex h-8 max-w-[36px] items-center gap-2 rounded-md border border-stone-200 px-2.5 text-sm font-medium text-stone-700 transition hover:border-stone-300 hover:text-stone-950 sm:max-w-40 dark:border-stone-800 dark:text-stone-200 dark:hover:border-stone-700 dark:hover:text-white", variant === "canvas" && "canvas-account-action")}
                             style={iconStyle}
                             aria-label="账户菜单"
                             title="账户菜单"
@@ -209,7 +209,7 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
             ) : (
                 <Link
                     href="/login"
-                    className="ml-1 inline-flex h-8 items-center gap-2 rounded-md border border-stone-200 px-2.5 text-sm font-medium text-stone-700 transition hover:border-stone-300 hover:text-stone-950 dark:border-stone-800 dark:text-stone-200 dark:hover:border-stone-700 dark:hover:text-white"
+                    className={cn("ml-1 inline-flex h-8 items-center gap-2 rounded-md border border-stone-200 px-2.5 text-sm font-medium text-stone-700 transition hover:border-stone-300 hover:text-stone-950 dark:border-stone-800 dark:text-stone-200 dark:hover:border-stone-700 dark:hover:text-white", variant === "canvas" && "canvas-account-action")}
                     style={iconStyle}
                 >
                     <UserCircle className="size-4" />
@@ -217,7 +217,7 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
                 </Link>
             )}
             {onOpenShortcuts ? (
-                <button type="button" className={naturalIconClass} style={iconStyle} onClick={onOpenShortcuts} aria-label="快捷键" title="快捷键">
+                <button type="button" className={cn(naturalIconClass, variant === "canvas" && "canvas-shortcuts-action")} style={iconStyle} onClick={onOpenShortcuts} aria-label="快捷键" title="快捷键">
                     <Keyboard className="size-4" />
                 </button>
             ) : null}

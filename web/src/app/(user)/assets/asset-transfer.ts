@@ -3,10 +3,11 @@ import { saveAs } from "file-saver";
 import { createZip, readZip } from "@/lib/zip";
 import { getMediaBlob, setMediaBlob } from "@/services/file-storage";
 import { getImageBlob, setImageBlob } from "@/services/image-storage";
+import { APP_EXPORT_ID, LEGACY_APP_EXPORT_ID } from "@/lib/storage-keys";
 import type { Asset } from "@/stores/use-asset-store";
 
 type AssetExportFile = {
-    app: "infinite-canvas";
+    app: typeof APP_EXPORT_ID | typeof LEGACY_APP_EXPORT_ID;
     version: 1;
     exportedAt: string;
     assets: Asset[];
@@ -37,7 +38,7 @@ export async function exportAssets(assets: Asset[]) {
         }),
     );
 
-    const data: AssetExportFile = { app: "infinite-canvas", version: 1, exportedAt: new Date().toISOString(), assets, files };
+    const data: AssetExportFile = { app: APP_EXPORT_ID, version: 1, exportedAt: new Date().toISOString(), assets, files };
     const zip = await createZip([{ name: "assets.json", data: JSON.stringify(data, null, 2) }, ...zipFiles]);
     saveAs(zip, "我的素材.zip");
 }
@@ -47,6 +48,7 @@ export async function readAssetPackage(file: File) {
     const assetFile = zip.get("assets.json");
     if (!assetFile) throw new Error("missing assets.json");
     const data = JSON.parse(await assetFile.text()) as AssetExportFile;
+    if (![APP_EXPORT_ID, LEGACY_APP_EXPORT_ID].includes(data.app)) throw new Error("不是当前应用的素材包");
     await Promise.all(
         data.files.map(async (item) => {
             const blob = zip.get(item.path);

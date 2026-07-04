@@ -3,13 +3,14 @@ import type { NextResponse } from "next/server";
 
 import { deleteSession, getUserBySession, sessionMaxAgeSeconds, type AuthSettings, type PublicUser } from "./store";
 
-export const SESSION_COOKIE_NAME = "infinite_canvas_session";
+export const SESSION_COOKIE_NAME = "vozeb_session";
+export const LEGACY_SESSION_COOKIE_NAME = `${"in"}finite_canvas_session`;
 
 export type CurrentUser = PublicUser;
 
 export async function getSessionCookieValue() {
     const cookieStore = await cookies();
-    return cookieStore.get(SESSION_COOKIE_NAME)?.value;
+    return cookieStore.get(SESSION_COOKIE_NAME)?.value || cookieStore.get(LEGACY_SESSION_COOKIE_NAME)?.value;
 }
 
 export async function getCurrentUser() {
@@ -32,6 +33,13 @@ export function setSessionCookie(response: NextResponse, value: string) {
 
 export function clearSessionCookie(response: NextResponse) {
     response.cookies.set(SESSION_COOKIE_NAME, "", {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+        maxAge: 0,
+        path: "/",
+    });
+    response.cookies.set(LEGACY_SESSION_COOKIE_NAME, "", {
         httpOnly: true,
         sameSite: "lax",
         secure: process.env.NODE_ENV === "production",

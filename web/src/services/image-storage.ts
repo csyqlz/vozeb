@@ -4,6 +4,7 @@ import localforage from "localforage";
 
 import { nanoid } from "nanoid";
 import { readImageMeta } from "@/lib/image-utils";
+import { APP_STORAGE_NAME, LEGACY_APP_STORAGE_NAME } from "@/lib/storage-keys";
 
 export type UploadedImage = {
     url: string;
@@ -14,7 +15,8 @@ export type UploadedImage = {
     mimeType: string;
 };
 
-const store = localforage.createInstance({ name: "infinite-canvas", storeName: "image_files" });
+const store = localforage.createInstance({ name: APP_STORAGE_NAME, storeName: "image_files" });
+const legacyStore = localforage.createInstance({ name: LEGACY_APP_STORAGE_NAME, storeName: "image_files" });
 const objectUrls = new Map<string, string>();
 
 export async function uploadImage(input: string | Blob): Promise<UploadedImage> {
@@ -31,7 +33,11 @@ export async function resolveImageUrl(storageKey?: string, fallback = "") {
     if (!storageKey) return fallback;
     const cached = objectUrls.get(storageKey);
     if (cached) return cached;
-    const blob = await store.getItem<Blob>(storageKey);
+    let blob = await store.getItem<Blob>(storageKey);
+    if (!blob) {
+        blob = await legacyStore.getItem<Blob>(storageKey);
+        if (blob) await store.setItem(storageKey, blob);
+    }
     if (!blob) return fallback;
     const url = URL.createObjectURL(blob);
     objectUrls.set(storageKey, url);
@@ -39,7 +45,11 @@ export async function resolveImageUrl(storageKey?: string, fallback = "") {
 }
 
 export async function getImageBlob(storageKey: string) {
-    return store.getItem<Blob>(storageKey);
+    const blob = await store.getItem<Blob>(storageKey);
+    if (blob) return blob;
+    const legacyBlob = await legacyStore.getItem<Blob>(storageKey);
+    if (legacyBlob) await store.setItem(storageKey, legacyBlob);
+    return legacyBlob;
 }
 
 export async function setImageBlob(storageKey: string, blob: Blob) {
@@ -62,6 +72,7 @@ export async function deleteStoredImages(keys: Iterable<string>) {
             if (url) URL.revokeObjectURL(url);
             objectUrls.delete(key);
             await store.removeItem(key);
+            await legacyStore.removeItem(key);
         }),
     );
 }

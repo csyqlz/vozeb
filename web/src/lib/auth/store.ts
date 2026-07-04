@@ -368,6 +368,44 @@ export async function createUser(input: { username: string; email?: string; emai
     });
 }
 
+export async function createUserByAdmin(input: { username: string; email?: string; displayName?: string; password: string; role?: UserRole; status?: UserStatus; pointsBalance?: number }) {
+    return mutateAuthDb((db) => {
+        const username = normalizeUsername(input.username);
+        const email = normalizeEmail(input.email);
+        const displayName = normalizeDisplayName(input.displayName || username);
+        validateUsername(username);
+        validatePassword(input.password);
+        if (email) validateEmail(email);
+        if (db.users.some((user) => user.username.toLowerCase() === username.toLowerCase())) throw new AuthInputError("Username already exists");
+        if (email && db.users.some((user) => user.email?.toLowerCase() === email.toLowerCase())) throw new AuthInputError("Email already exists");
+
+        const now = new Date().toISOString();
+        const pointsBalance = normalizePoints(input.pointsBalance, db.settings.defaultPoints);
+        const user: StoredUser = {
+            id: randomUUID(),
+            username,
+            email: email || undefined,
+            displayName,
+            role: input.role === "admin" ? "admin" : "user",
+            status: input.status === "disabled" ? "disabled" : "active",
+            pointsBalance,
+            passwordHash: hashPassword(input.password),
+            createdAt: now,
+            updatedAt: now,
+        };
+        db.users.push(user);
+        addPointRecord(db, {
+            userId: user.id,
+            type: "admin-adjust",
+            amount: pointsBalance,
+            balanceAfter: pointsBalance,
+            description: "Admin created user",
+            createdAt: now,
+        });
+        return toPublicUser(user, db);
+    });
+}
+
 export async function authenticateUser(input: { username: string; password: string }) {
     const account = normalizeUsername(input.username);
     const accountEmail = normalizeEmail(input.username);
@@ -774,6 +812,7 @@ function normalizeText(value: unknown, fallback: string, maxLength: number) {
 function normalizeLogoUrl(value: unknown) {
     const url = typeof value === "string" ? value.trim() : "";
     if (!url) return DEFAULT_SITE_SETTINGS.logoUrl;
+    if (url.startsWith("data:image/")) return url.slice(0, 500000);
     if (url.startsWith("/") || url.startsWith("https://") || url.startsWith("http://") || url.startsWith("data:image/")) return url.slice(0, 2000);
     return DEFAULT_SITE_SETTINGS.logoUrl;
 }

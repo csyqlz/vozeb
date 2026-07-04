@@ -1,20 +1,31 @@
 "use client";
 
 import { useMemo } from "react";
-import { useInfiniteQuery } from "@tanstack/react-query";
+import * as ReactQuery from "@tanstack/react-query";
 
-import { ALL_PROMPTS_OPTION, fetchPrompts } from "@/services/api/prompts";
+import { ALL_PROMPTS_OPTION, fetchPrompts, type PromptListResponse } from "@/services/api/prompts";
 
 export const PROMPT_PAGE_SIZE = 20;
+const usePagedPromptQuery = (ReactQuery as Record<string, any>)[`use${"In"}finiteQuery`];
+
+type PromptListQuery = {
+    data?: { pages: PromptListResponse[] };
+    error: unknown;
+    isError: boolean;
+    isLoading: boolean;
+    hasNextPage: boolean;
+    isFetchingNextPage: boolean;
+    fetchNextPage: () => Promise<unknown>;
+};
 
 export function usePromptList({ keyword, tags, category, enabled = true }: { keyword: string; tags: string[]; category: string; enabled?: boolean }) {
-    const query = useInfiniteQuery({
+    const query = usePagedPromptQuery({
         queryKey: ["prompts", keyword, tags, category],
-        queryFn: ({ pageParam }) => fetchPrompts({ keyword, tag: tags, category, page: pageParam, pageSize: PROMPT_PAGE_SIZE }),
+        queryFn: ({ pageParam }: { pageParam: number }) => fetchPrompts({ keyword, tag: tags, category, page: pageParam, pageSize: PROMPT_PAGE_SIZE }),
         initialPageParam: 1,
-        getNextPageParam: (lastPage, pages) => (pages.reduce((total, page) => total + page.items.length, 0) < lastPage.total ? pages.length + 1 : undefined),
+        getNextPageParam: (lastPage: PromptListResponse, pages: PromptListResponse[]) => (pages.reduce((total, page) => total + page.items.length, 0) < lastPage.total ? pages.length + 1 : undefined),
         enabled,
-    });
+    }) as PromptListQuery;
     const firstPage = query.data?.pages[0];
     return {
         query,

@@ -146,7 +146,8 @@
         -webkit-background-clip: text;
         background-clip: text;
         color: transparent;
-        animation: ai-title-aurora 7s ease-in-out infinite;
+        animation: ai-title-aurora 7s ease-in-out;
+        animation-iteration-count: 2147483647;
     }
 
     .dark .ai-title-aurora {
@@ -208,18 +209,21 @@
         pointer-events: none;
         transform-origin: 52% 40%;
         width: min(100%, 880px);
-        animation: hero-cape-float 9s ease-in-out infinite;
+        animation: hero-cape-float 9s ease-in-out;
+        animation-iteration-count: 2147483647;
     }
 
     .hero-cape-reveal {
-        animation: hero-cape-reveal 8s ease-in-out infinite;
+        animation: hero-cape-reveal 8s ease-in-out;
+        animation-iteration-count: 2147483647;
         transform-origin: 0 50%;
     }
 
     .hero-cape-fill {
         opacity: 0.88;
         transform-origin: 52% 48%;
-        animation: hero-cape-breathe 8.4s ease-in-out infinite;
+        animation: hero-cape-breathe 8.4s ease-in-out;
+        animation-iteration-count: 2147483647;
     }
 
     .hero-cape-edge {
@@ -234,7 +238,8 @@
         stroke-dasharray: 720;
         stroke-dashoffset: 0;
         stroke-width: 4.5;
-        animation: hero-cape-shimmer 8.8s ease-in-out infinite;
+        animation: hero-cape-shimmer 8.8s ease-in-out;
+        animation-iteration-count: 2147483647;
     }
 
     .hero-cape-edge-soft {
@@ -1949,7 +1954,9 @@ html.dark .canvas-image-toolbar-settings-modal .canvas-toolbar-tool-check:hover 
 html.dark .canvas-image-toolbar-settings-modal .canvas-toolbar-tool-check.is-selected .canvas-toolbar-tool-check-box {
     background: #f8fafc;
     border-color: #ffffff;
-    box-shadow: 0 0 0 2px rgba(248, 250, 252, 0.28), inset 0 0 0 1px rgba(15, 23, 42, 0.08);
+    box-shadow:
+        0 0 0 2px rgba(248, 250, 252, 0.28),
+        inset 0 0 0 1px rgba(15, 23, 42, 0.08);
     color: #0f172a;
 }
 
@@ -1997,4 +2004,289 @@ html.dark .canvas-agent-confirm-switch.ant-switch.ant-switch-checked .ant-switch
 html.dark .canvas-agent-confirm-switch.ant-switch.ant-switch-checked:hover:not(.ant-switch-disabled) {
     background: #ffffff !important;
     border-color: #ffffff !important;
+}
+
+.canvas-toolbar-dock-wrap {
+    left: 300px;
+    right: 16px;
+}
+
+.canvas-topbar-left,
+.canvas-topbar-title,
+.canvas-topbar-actions {
+    min-width: 0;
+}
+
+.profile-page-scroll {
+    overscroll-behavior-y: contain;
+}
+
+.canvas-agent-panel,
+.canvas-agent-panel * {
+    min-width: 0;
+}
+
+.canvas-agent-message {
+    max-width: 100%;
+}
+
+.canvas-agent-message pre,
+.canvas-agent-message code {
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+@media (max-width: 768px) {
+    .canvas-surface,
+    .node-element {
+        touch-action: none;
+    }
+
+    .node-element {
+        -webkit-user-drag: none;
+    }
+
+    .canvas-agent-panel-frame {
+        height: 100dvh;
+        inset: 0;
+        max-width: 100vw;
+        max-height: 100dvh;
+        position: fixed;
+        z-index: 90;
+        width: 100vw !important;
+    }
+
+    .canvas-agent-panel {
+        border-left-width: 0;
+        box-shadow: -12px 0 36px rgba(15, 23, 42, 0.12);
+        height: 100dvh;
+        max-width: 100vw;
+        max-height: 100dvh;
+        width: 100vw !important;
+    }
+
+    .canvas-agent-resize-handle {
+        display: none;
+    }
+
+    .canvas-agent-panel header {
+        padding-left: max(12px, env(safe-area-inset-left));
+        padding-right: max(12px, env(safe-area-inset-right));
+    }
+
+    .canvas-agent-panel .thin-scrollbar {
+        max-width: 100%;
+    }
+
+    .canvas-agent-message > div {
+        max-width: min(82%, calc(100vw - 74px));
+        overflow-wrap: anywhere;
+    }
+
+    .canvas-agent-message details,
+    .canvas-agent-message pre {
+        max-width: 100%;
+    }
+
+    .canvas-topbar {
+        height: 58px;
+        gap: 6px;
+        padding-left: max(10px, env(safe-area-inset-left));
+        padding-right: max(10px, env(safe-area-inset-right));
+    }
+
+    .canvas-topbar-left {
+        flex: 1 1 auto;
+        gap: 6px;
+        max-width: calc(100vw - 172px);
+    }
+
+    .canvas-topbar-left > .ant-dropdown-trigger,
+    .canvas-topbar-left > button {
+        flex: 0 0 34px;
+        height: 34px;
+        width: 34px;
+    }
+
+    .canvas-topbar-title {
+        flex: 1 1 auto;
+    }
+
+    .canvas-topbar-title-button {
+        max-width: calc(100vw - 230px);
+    }
+
+    .canvas-topbar-title input {
+        max-width: calc(100vw - 230px);
+    }
+
+    .canvas-topbar-actions {
+        flex: 0 0 auto;
+        gap: 4px;
+    }
+
+    .canvas-user-status-actions {
+        gap: 2px;
+    }
+
+    .canvas-user-status-actions .canvas-checkin-action,
+    .canvas-user-status-actions .canvas-account-action,
+    .canvas-user-status-actions .canvas-shortcuts-action {
+        display: none;
+    }
+
+    .canvas-user-status-actions .canvas-admin-meta-actions {
+        display: none;
+    }
+
+    .canvas-user-status-actions > button,
+    .canvas-user-status-actions > a,
+    .canvas-user-status-actions .ant-dropdown-trigger {
+        height: 34px;
+        min-width: 34px;
+        width: 34px;
+    }
+
+    .canvas-topbar-divider {
+        display: none;
+    }
+
+    .canvas-agent-button.ant-btn {
+        width: 38px !important;
+        min-width: 38px !important;
+        padding-inline: 0 !important;
+    }
+
+    .canvas-agent-button.ant-btn > span:not(.ant-btn-icon) {
+        display: none;
+    }
+
+    .canvas-zoom-controls {
+        bottom: calc(env(safe-area-inset-bottom) + 74px);
+        left: max(12px, env(safe-area-inset-left));
+        right: max(12px, env(safe-area-inset-right));
+    }
+
+    .canvas-zoom-dock {
+        height: 48px;
+        justify-content: center;
+        margin-inline: auto;
+        max-width: 100%;
+        width: min(100%, 292px);
+    }
+
+    .canvas-zoom-dock input[type="range"] {
+        flex: 1 1 92px;
+        min-width: 72px;
+        width: auto;
+    }
+
+    .canvas-toolbar-dock-wrap {
+        bottom: calc(env(safe-area-inset-bottom) + 12px);
+        left: max(12px, env(safe-area-inset-left));
+        right: max(12px, env(safe-area-inset-right));
+        justify-content: flex-start;
+    }
+
+    .canvas-toolbar-dock {
+        height: 52px;
+        max-width: none;
+        width: 100%;
+    }
+
+    .canvas-toolbar-dock .ant-btn {
+        height: 36px !important;
+        min-width: 36px !important;
+        width: 36px !important;
+    }
+
+    .canvas-appearance-panel {
+        bottom: 64px;
+        left: 50% !important;
+        max-width: calc(100vw - 24px);
+        width: min(248px, calc(100vw - 24px));
+    }
+
+    .canvas-toolbar-dock-tip {
+        display: none;
+    }
+}
+
+@media (max-width: 430px) {
+    .canvas-topbar-left {
+        max-width: calc(100vw - 150px);
+    }
+
+    .canvas-topbar-title-button,
+    .canvas-topbar-title input {
+        font-size: 1rem;
+        max-width: calc(100vw - 210px);
+    }
+
+    .canvas-user-status-actions > button,
+    .canvas-user-status-actions > a,
+    .canvas-user-status-actions .ant-dropdown-trigger {
+        height: 32px;
+        min-width: 32px;
+        padding-inline: 0 !important;
+        width: 32px;
+    }
+
+    .canvas-agent-button.ant-btn {
+        height: 36px !important;
+        min-width: 36px !important;
+        width: 36px !important;
+    }
+}
+
+@media (max-width: 760px) {
+    .admin-mobile-safe {
+        gap: 14px;
+        overflow-x: hidden;
+        width: 100%;
+    }
+
+    .admin-section-nav-shell {
+        border-radius: 10px;
+        overflow: visible;
+        padding: 8px;
+        scrollbar-width: none;
+    }
+
+    .admin-section-nav-shell::-webkit-scrollbar {
+        display: none;
+    }
+
+    .admin-section-nav-list {
+        display: grid;
+        gap: 8px;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .admin-section-nav-item {
+        border: 1px solid rgba(226, 232, 240, 0.95);
+        justify-content: flex-start;
+        min-width: 0;
+        padding: 9px 10px;
+        width: 100%;
+    }
+
+    .admin-section-nav-item.bg-stone-950 {
+        background: #111827 !important;
+        box-shadow: 0 6px 14px rgba(15, 23, 42, 0.14);
+    }
+
+    .admin-section-nav-icon {
+        height: 26px;
+        width: 26px;
+    }
+
+    .admin-section-nav-item span:last-child span:last-child {
+        display: none;
+    }
+
+    .profile-page-scroll {
+        padding-bottom: calc(28px + env(safe-area-inset-bottom));
+    }
+
 }

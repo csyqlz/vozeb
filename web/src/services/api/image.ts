@@ -5,7 +5,7 @@ import { nanoid } from "nanoid";
 import { dataUrlToFile } from "@/lib/image-utils";
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
 import { imageToDataUrl } from "@/services/image-storage";
-import { refreshUserPointsIfSystem } from "@/services/api/points";
+import { refreshUserPointsIfSystem, syncUserPointsFromHeaders } from "@/services/api/points";
 import type { ReferenceImage } from "@/types/image";
 
 export type AiTextMessage = {
@@ -388,6 +388,7 @@ async function requestStreamingResponse(config: AiConfig, body: Record<string, u
         signal: options?.signal,
     });
     if (!response.ok) throw new Error(await readFetchError(response, "请求失败"));
+    syncUserPointsFromHeaders(response.headers, config.apiSource);
     if (!response.body) {
         const payload = (await response.json()) as ResponseApiPayload;
         validateResponsePayload(payload);
@@ -487,6 +488,7 @@ async function requestGeminiStreamingResponse(config: AiConfig, body: Record<str
         signal: options?.signal,
     });
     if (!response.ok) throw new Error(await readFetchError(response, "请求失败"));
+    syncUserPointsFromHeaders(response.headers, config.apiSource);
     if (!response.body) {
         const payload = (await response.json()) as GeminiPayload;
         return parseGeminiToolResponse(payload);
@@ -575,6 +577,7 @@ async function requestGeminiImagesOnce(config: AiConfig, prompt: string, referen
         },
         { headers: geminiHeaders(config), signal: options?.signal },
     );
+    syncUserPointsFromHeaders(response.headers, config.apiSource);
     return parseGeminiImagePayload(response.data);
 }
 
@@ -625,6 +628,7 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
                 signal: options?.signal,
             },
         );
+        syncUserPointsFromHeaders(response.headers, requestConfig.apiSource);
         const images = parseImagePayload(response.data);
         await refreshUserPointsIfSystem(requestConfig.apiSource);
         return images;
@@ -667,6 +671,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
 
     try {
         const response = await axios.post<ImageApiResponse>(aiApiUrl(requestConfig, "/images/edits"), formData, { headers: aiHeaders(requestConfig), signal: options?.signal });
+        syncUserPointsFromHeaders(response.headers, requestConfig.apiSource);
         const images = parseImagePayload(response.data);
         await refreshUserPointsIfSystem(requestConfig.apiSource);
         return images;

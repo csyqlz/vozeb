@@ -3,9 +3,12 @@
 import localforage from "localforage";
 import { nanoid } from "nanoid";
 
+import { APP_STORAGE_NAME, LEGACY_APP_STORAGE_NAME } from "@/lib/storage-keys";
+
 export type UploadedFile = { url: string; storageKey: string; bytes: number; mimeType: string; width?: number; height?: number; durationMs?: number };
 
-const store = localforage.createInstance({ name: "infinite-canvas", storeName: "media_files" });
+const store = localforage.createInstance({ name: APP_STORAGE_NAME, storeName: "media_files" });
+const legacyStore = localforage.createInstance({ name: LEGACY_APP_STORAGE_NAME, storeName: "media_files" });
 const objectUrls = new Map<string, string>();
 
 export async function uploadMediaFile(input: string | Blob, prefix = "file"): Promise<UploadedFile> {
@@ -22,7 +25,11 @@ export async function resolveMediaUrl(storageKey?: string, fallback = "") {
     if (!storageKey) return fallback;
     const cached = objectUrls.get(storageKey);
     if (cached) return cached;
-    const blob = await store.getItem<Blob>(storageKey);
+    let blob = await store.getItem<Blob>(storageKey);
+    if (!blob) {
+        blob = await legacyStore.getItem<Blob>(storageKey);
+        if (blob) await store.setItem(storageKey, blob);
+    }
     if (!blob) return fallback;
     const url = URL.createObjectURL(blob);
     objectUrls.set(storageKey, url);
@@ -30,7 +37,11 @@ export async function resolveMediaUrl(storageKey?: string, fallback = "") {
 }
 
 export async function getMediaBlob(storageKey: string) {
-    return store.getItem<Blob>(storageKey);
+    const blob = await store.getItem<Blob>(storageKey);
+    if (blob) return blob;
+    const legacyBlob = await legacyStore.getItem<Blob>(storageKey);
+    if (legacyBlob) await store.setItem(storageKey, legacyBlob);
+    return legacyBlob;
 }
 
 export async function setMediaBlob(storageKey: string, blob: Blob) {
@@ -47,6 +58,7 @@ export async function deleteStoredMedia(keys: Iterable<string>) {
             if (url) URL.revokeObjectURL(url);
             objectUrls.delete(key);
             await store.removeItem(key);
+            await legacyStore.removeItem(key);
         }),
     );
 }

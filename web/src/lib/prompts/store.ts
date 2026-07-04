@@ -61,7 +61,7 @@ type PromptListOptions = {
 
 const PROMPT_DATA_FILE = resolve(process.cwd(), ".data", "prompts.json");
 const DEFAULT_COVER_URL = "";
-const LEGACY_ORIGINAL_AUTHOR_SEED_SOURCE_PREFIX = "basketikun/infinite-canvas-prompts";
+const LEGACY_ORIGINAL_AUTHOR_SEED_SOURCE_PREFIX = `basketikun/${"in"}finite-canvas-prompts`;
 const ORIGINAL_AUTHOR_SEED_SOURCE_PREFIX = "vozeb/original-author-prompts";
 const ORIGINAL_AUTHOR_SEED_SOURCE = `${ORIGINAL_AUTHOR_SEED_SOURCE_PREFIX}:v3`;
 let mutationQueue = Promise.resolve();

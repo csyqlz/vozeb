@@ -5,6 +5,8 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { nanoid } from "nanoid";
 
+import { appStorageKey, legacyAppStorageKey, migrateLocalStorageKey } from "@/lib/storage-keys";
+
 export type ApiCallFormat = "openai" | "gemini";
 
 export type ModelChannel = {
@@ -58,7 +60,8 @@ export type WebdavSyncConfig = {
     lastSyncedAt: string;
 };
 
-export const CONFIG_STORE_KEY = "infinite-canvas:ai_config_store";
+export const CONFIG_STORE_KEY = appStorageKey("ai_config_store");
+migrateLocalStorageKey(CONFIG_STORE_KEY, legacyAppStorageKey("ai_config_store"));
 export type ModelCapability = "image" | "video" | "text" | "audio";
 const CHANNEL_MODEL_SEPARATOR = "::";
 const OPENAI_BASE_URL = "https://api.openai.com";
@@ -110,7 +113,7 @@ export const defaultWebdavSyncConfig: WebdavSyncConfig = {
     url: "",
     username: "",
     password: "",
-    directory: "infinite-canvas",
+    directory: "vozeb",
     lastSyncedAt: "",
 };
 

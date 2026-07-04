@@ -2,9 +2,12 @@ import { NextResponse } from "next/server";
 
 import { readJsonBody } from "@/lib/auth/request";
 import { getCurrentUser } from "@/lib/auth/session";
+import { configureServerProxyDispatcher } from "@/lib/server/proxy-dispatcher";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+configureServerProxyDispatcher();
 
 type ModelsPayload = {
     baseUrl?: unknown;

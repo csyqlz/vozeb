@@ -271,9 +271,9 @@ async function login(page) {
 async function seedBrowserState(page) {
     await page.goto(baseUrl, { waitUntil: "networkidle2" });
     await page.evaluate(async ({ project, assets }) => {
-        localStorage.setItem("infinite-canvas:theme_store", JSON.stringify({ state: { theme: "light" }, version: 0 }));
+        localStorage.setItem("vozeb:theme_store", JSON.stringify({ state: { theme: "light" }, version: 0 }));
         localStorage.setItem(
-            "infinite-canvas:config_store",
+            "vozeb:ai_config_store",
             JSON.stringify({
                 state: {
                     config: {
@@ -294,12 +294,12 @@ async function seedBrowserState(page) {
                 version: 0,
             }),
         );
-        await putIdb("app_state", "infinite-canvas:canvas_store", JSON.stringify({ state: { projects: [project] }, version: 0 }));
-        await putIdb("app_state", "infinite-canvas:asset_store", JSON.stringify({ state: { assets }, version: 0 }));
+        await putIdb("app_state", "vozeb:canvas_store", JSON.stringify({ state: { projects: [project] }, version: 0 }));
+        await putIdb("app_state", "vozeb:asset_store", JSON.stringify({ state: { assets }, version: 0 }));
 
         async function putIdb(storeName, key, value) {
             const db = await new Promise((resolve, reject) => {
-                const request = indexedDB.open("infinite-canvas");
+                const request = indexedDB.open("vozeb");
                 request.onsuccess = () => resolve(request.result);
                 request.onerror = () => reject(request.error);
             });

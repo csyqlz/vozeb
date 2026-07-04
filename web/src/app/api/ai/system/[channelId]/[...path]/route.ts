@@ -2,9 +2,12 @@ import { NextResponse } from "next/server";
 
 import { consumeUserPoints, getAuthSettings, isQuotaExceededError, refundUserPoints, type ApiCallFormat } from "@/lib/auth/store";
 import { getCurrentUser } from "@/lib/auth/session";
+import { configureServerProxyDispatcher } from "@/lib/server/proxy-dispatcher";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+configureServerProxyDispatcher();
 
 type RouteContext = {
     params: Promise<{ channelId: string; path: string[] }>;
@@ -51,6 +54,14 @@ async function proxySystemRequest(request: Request, context: RouteContext) {
     const body = request.method === "GET" || request.method === "HEAD" ? undefined : await request.arrayBuffer();
     const pointsRequest = classifyPointsRequest(request.method, channel.apiFormat, path, contentType, body);
     let pointsResult: Awaited<ReturnType<typeof consumeUserPoints>> | null = null;
+    let refundedPointsRemaining: number | null = null;
+    let pointsSettled = false;
+    const refundConsumedPoints = async () => {
+        if (!pointsResult || pointsSettled) return;
+        pointsSettled = true;
+        const refundedUser = await refundUserPoints(currentUser.id, pointsResult.model, pointsResult.cost);
+        refundedPointsRemaining = typeof refundedUser?.pointsBalance === "number" ? refundedUser.pointsBalance : null;
+    };
     if (pointsRequest) {
         try {
             pointsResult = await consumeUserPoints(currentUser.id, pointsRequest.model, pointsRequest.amount);
@@ -59,6 +70,7 @@ async function proxySystemRequest(request: Request, context: RouteContext) {
             throw error;
         }
     }
+    request.signal.addEventListener("abort", () => void refundConsumedPoints(), { once: true });
 
     let upstream: Response;
     try {
@@ -67,22 +79,24 @@ async function proxySystemRequest(request: Request, context: RouteContext) {
             headers,
             body,
             cache: "no-store",
+            signal: request.signal,
         });
     } catch (error) {
-        if (pointsResult) await refundUserPoints(currentUser.id, pointsResult.model, pointsResult.cost);
+        await refundConsumedPoints();
         console.error("System API proxy request failed", error);
-        return NextResponse.json({ error: "默认接口请求失败，请稍后重试" }, { status: 502 });
+        return NextResponse.json({ error: "默认接口请求失败，请稍后重试" }, { status: 502, headers: responseHeaders(new Headers(), null, refundedPointsRemaining) });
     }
 
     if (!upstream.ok && pointsResult) {
-        await refundUserPoints(currentUser.id, pointsResult.model, pointsResult.cost);
+        await refundConsumedPoints();
         pointsResult = null;
     }
+    if (upstream.ok) pointsSettled = true;
 
     return new Response(upstream.body, {
         status: upstream.status,
         statusText: upstream.statusText,
-        headers: responseHeaders(upstream.headers, pointsResult),
+        headers: responseHeaders(upstream.headers, pointsResult, refundedPointsRemaining),
     });
 }
 
@@ -156,7 +170,7 @@ function normalizeApiBaseUrl(baseUrl: string, apiFormat: "openai" | "gemini") {
     return `${normalized}/v1`;
 }
 
-function responseHeaders(headers: Headers, pointsResult?: Awaited<ReturnType<typeof consumeUserPoints>> | null) {
+function responseHeaders(headers: Headers, pointsResult?: Awaited<ReturnType<typeof consumeUserPoints>> | null, refundedPointsRemaining?: number | null) {
     const nextHeaders = new Headers();
     const passthrough = ["content-type", "cache-control", "content-disposition"];
     passthrough.forEach((key) => {
@@ -166,6 +180,8 @@ function responseHeaders(headers: Headers, pointsResult?: Awaited<ReturnType<typ
     if (pointsResult) {
         nextHeaders.set("x-vozeb-points-cost", String(pointsResult.cost));
         nextHeaders.set("x-vozeb-points-remaining", String(pointsResult.remaining));
+    } else if (typeof refundedPointsRemaining === "number") {
+        nextHeaders.set("x-vozeb-points-remaining", String(refundedPointsRemaining));
     }
     return nextHeaders;
 }

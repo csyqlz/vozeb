@@ -184,7 +184,7 @@ export default function HomePage() {
                             <h1 className="ai-title-aurora max-w-6xl text-balance text-7xl font-semibold tracking-normal sm:text-8xl lg:text-[9rem] xl:text-[11rem]">{site.title || "VOZEB"}</h1>
                             <span className="hero-version-badge inline-flex items-center gap-2 rounded-lg border border-cyan-300/45 bg-white/82 px-3.5 py-2 text-sm font-semibold text-stone-700 shadow-sm shadow-cyan-950/5 dark:border-cyan-200/20 dark:bg-cyan-200/8 dark:text-cyan-100">
                                 <Sparkles className="size-4" />
-                                v0.7.0 创作入口
+                                v0.7.1 创作入口
                             </span>
                             <HeroCape />
                         </div>

@@ -19,7 +19,7 @@ const MAX_ATTACHMENTS = 6;
 const MAX_ATTACHMENT_PAYLOAD_BYTES = 28 * 1024 * 1024;
 const DEFAULT_AGENT_URL = "http://127.0.0.1:17371";
 const AGENT_CONNECT_STEPS = [
-    { title: "安装 Codex 插件", text: "在 Codex app 安装 Infinite Canvas 插件后，首次使用插件会自动启动本地 Agent。" },
+    { title: "安装 Codex 插件", text: "在 Codex app 安装 VOZEB Canvas 插件后，首次使用插件会自动启动本地 Agent。" },
     { title: "打开画布连接", text: "回到这里点击连接，网页会自动读取本机 Agent 配置。" },
     { title: "手动启动备用", text: "如果自动发现失败，再运行下面命令。", command: "npx -y @basketikun/canvas-agent" },
 ];
@@ -569,20 +569,20 @@ export function CanvasLocalAgentPanel({ snapshot, canUndoOps, collapsed, embedde
 
     return (
         <motion.div
-            className="relative z-[70] flex h-full shrink-0"
+            className="canvas-agent-panel-frame relative z-[70] flex h-full shrink-0"
             initial={{ width: 0, opacity: 0 }}
             animate={{ width: collapsed ? 0 : width + 1, opacity: collapsed ? 0 : 1 }}
             transition={{ duration: resizing ? 0 : PANEL_MOTION_SECONDS, ease: [0.22, 1, 0.36, 1] }}
             style={{ overflow: "clip", pointerEvents: collapsed ? "none" : undefined }}
         >
             <motion.aside
-                className="relative flex h-full shrink-0 flex-col border-l"
+                className="canvas-agent-panel relative flex h-full shrink-0 flex-col border-l"
                 initial={{ x: 48 }}
                 animate={{ x: collapsed ? 28 : 0 }}
                 transition={{ duration: resizing ? 0 : PANEL_MOTION_SECONDS, ease: [0.22, 1, 0.36, 1] }}
                 style={{ width, background: theme.node.panel, borderColor: theme.node.stroke, color: theme.node.text }}
             >
-                <div className="absolute left-0 top-0 h-full w-1 cursor-col-resize transition hover:bg-current/20" onPointerDown={startResize} />
+                <div className="canvas-agent-resize-handle absolute left-0 top-0 h-full w-1 cursor-col-resize transition hover:bg-current/20" onPointerDown={startResize} />
                 {content}
             </motion.aside>
         </motion.div>
@@ -811,7 +811,7 @@ function parseEventData<T>(event: Event) {
 
 function formatLogText(logs: AgentEventLog[], context: AgentLogContext) {
     const head = [
-        "Infinite Canvas Agent 诊断日志",
+        "VOZEB Canvas Agent 诊断日志",
         `Canvas Agent: ${context.endpoint}`,
         `连接: ${context.connected ? "在线" : context.enabled ? "连接中" : "未启用"}`,
         `状态: ${context.activity}`,

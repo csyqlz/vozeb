@@ -10,6 +10,7 @@ import { useAssetStore } from "@/stores/use-asset-store";
 import type { WebdavSyncConfig } from "@/stores/use-config-store";
 import type { CanvasProject } from "@/app/(user)/canvas/stores/use-canvas-store";
 import { useCanvasStore } from "@/app/(user)/canvas/stores/use-canvas-store";
+import { APP_EXPORT_ID, APP_STORAGE_NAME, LEGACY_APP_EXPORT_ID, LEGACY_APP_STORAGE_NAME } from "@/lib/storage-keys";
 
 type StoredLog = Record<string, unknown> & { id?: string };
 export type AppSyncDomainKey = "canvas" | "assets" | "image-workbench" | "video-workbench";
@@ -26,7 +27,7 @@ type AppSyncFile = {
 };
 
 type DomainManifest<T> = {
-    app: "infinite-canvas";
+    app: typeof APP_EXPORT_ID | typeof LEGACY_APP_EXPORT_ID;
     version: 1;
     domain: DomainKey;
     exportedAt: string;
@@ -77,8 +78,10 @@ export type AppSyncProgressEvent = {
 export type AppSyncProgress = (event: AppSyncProgressEvent) => void;
 
 const FILE_CONCURRENCY = 3;
-const imageLogStore = localforage.createInstance({ name: "infinite-canvas", storeName: "image_generation_logs" });
-const videoLogStore = localforage.createInstance({ name: "infinite-canvas", storeName: "video_generation_logs" });
+const imageLogStore = localforage.createInstance({ name: APP_STORAGE_NAME, storeName: "image_generation_logs" });
+const videoLogStore = localforage.createInstance({ name: APP_STORAGE_NAME, storeName: "video_generation_logs" });
+const legacyImageLogStore = localforage.createInstance({ name: LEGACY_APP_STORAGE_NAME, storeName: "image_generation_logs" });
+const legacyVideoLogStore = localforage.createInstance({ name: LEGACY_APP_STORAGE_NAME, storeName: "video_generation_logs" });
 type LogStore = typeof imageLogStore;
 const storageKeyPattern = /^(image|video|audio|file|video-reference|audio-reference):/;
 
@@ -107,7 +110,7 @@ export async function syncAppDataToWebdav(config: WebdavSyncConfig, onProgress?:
             key: "image-workbench",
             label: "生图工作台",
             emptyData: { logs: [] },
-            localData: async () => ({ logs: await readStoredLogs(imageLogStore) }),
+            localData: async () => ({ logs: await readStoredLogs(imageLogStore, legacyImageLogStore) }),
             mergeData: (local, remote) => ({ logs: mergeById(local.logs, remote.logs, "createdAt") }),
             applyData: async (data) => replaceStoredLogs(imageLogStore, data.logs),
         }),
@@ -115,7 +118,7 @@ export async function syncAppDataToWebdav(config: WebdavSyncConfig, onProgress?:
             key: "video-workbench",
             label: "视频创作台",
             emptyData: { logs: [] },
-            localData: async () => ({ logs: await readStoredLogs(videoLogStore) }),
+            localData: async () => ({ logs: await readStoredLogs(videoLogStore, legacyVideoLogStore) }),
             mergeData: (local, remote) => ({ logs: mergeById(local.logs, remote.logs, "createdAt") }),
             applyData: async (data) => replaceStoredLogs(videoLogStore, data.logs),
         }),
@@ -154,7 +157,7 @@ async function syncDomain<T>(config: WebdavSyncConfig, onProgress: AppSyncProgre
 
         emitProgress(onProgress, { domain: options.key, label: options.label, stage: "上传新增媒体", status: "active" });
         const uploaded = await uploadChangedFiles(config, options.key, mergedData, remoteManifest?.files || [], onProgress);
-        const manifest: DomainManifest<T> = { app: "infinite-canvas", version: 1, domain: options.key, exportedAt: new Date().toISOString(), data: mergedData, files: uploaded.files };
+        const manifest: DomainManifest<T> = { app: APP_EXPORT_ID, version: 1, domain: options.key, exportedAt: new Date().toISOString(), data: mergedData, files: uploaded.files };
         const manifestFile = new Blob([JSON.stringify(manifest, null, 2)], { type: "application/json" });
         emitProgress(onProgress, { domain: options.key, label: options.label, stage: `上传清单 ${formatBytes(manifestFile.size)}`, status: "active" });
         await uploadWebdavFile(config, domainPath(options.key, WEBDAV_MANIFEST_FILE_NAME), manifestFile, "application/json");
@@ -178,9 +181,9 @@ async function readDomainManifest<T>(config: WebdavSyncConfig, domain: DomainKey
     const file = await downloadWebdavFile(config, domainPath(domain, WEBDAV_MANIFEST_FILE_NAME));
     if (!file) return null;
     const data = JSON.parse(await file.text()) as DomainManifest<T>;
-    if (data.app !== "infinite-canvas" || data.domain !== domain) throw new Error(`${domain} 同步清单不是当前应用的数据`);
+    if (![APP_EXPORT_ID, LEGACY_APP_EXPORT_ID].includes(data.app) || data.domain !== domain) throw new Error(`${domain} 同步清单不是当前应用的数据`);
     return {
-        app: "infinite-canvas",
+        app: APP_EXPORT_ID,
         version: 1,
         domain,
         exportedAt: data.exportedAt || new Date().toISOString(),
@@ -277,11 +280,19 @@ async function hydrateAsset(asset: Asset): Promise<Asset> {
     return asset;
 }
 
-async function readStoredLogs(store: LogStore) {
+async function readStoredLogs(store: LogStore, legacyStore?: LogStore) {
     const logs: StoredLog[] = [];
     await store.iterate<StoredLog, void>((value) => {
         if (value && typeof value === "object") logs.push(value);
     });
+    if (!logs.length && legacyStore) {
+        await legacyStore.iterate<StoredLog, void>((value, key) => {
+            if (value && typeof value === "object") {
+                logs.push(value);
+                void store.setItem(key, value);
+            }
+        });
+    }
     return logs;
 }
 

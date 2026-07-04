@@ -1,10 +1,10 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { App, Button, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Table, Tag } from "antd";
 import type { TableColumnsType } from "antd";
-import { Database, Download, Gift, Globe2, Image as ImageIcon, KeyRound, Mail, PlugZap, Plus, RefreshCw, Save, Search, Send, ShieldCheck, SlidersHorizontal, Trash2, UserCog, UserRound, UsersRound } from "lucide-react";
+import { Database, Download, Gift, Globe2, Image as ImageIcon, KeyRound, Mail, PlugZap, Plus, RefreshCw, Save, Search, Send, ShieldCheck, SlidersHorizontal, Trash2, Upload, UserCog, UserRound, UsersRound } from "lucide-react";
 import { nanoid } from "nanoid";
 
 import { DEFAULT_MODEL_POINT_COST_KEY } from "@/constant/credits";
@@ -28,6 +28,7 @@ type PromptFormValue = {
 };
 
 type UserEditorValue = {
+    username?: string;
     displayName: string;
     email?: string;
     password?: string;
@@ -49,6 +50,7 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
     const { message } = App.useApp();
     const [promptForm] = Form.useForm<PromptFormValue>();
     const [userForm] = Form.useForm<UserEditorValue>();
+    const logoInputRef = useRef<HTMLInputElement>(null);
     const [users, setUsers] = useState(initialUsers);
     const [settings, setSettings] = useState(initialSettings);
     const [prompts, setPrompts] = useState<Prompt[]>([]);
@@ -70,6 +72,7 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
     const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
     const [bulkDeletingUsers, setBulkDeletingUsers] = useState(false);
     const [editingUser, setEditingUser] = useState<PublicUser | null>(null);
+    const [creatingUser, setCreatingUser] = useState(false);
     const [activeSection, setActiveSection] = useState<AdminSectionKey>("overview");
     const [customPointModel, setCustomPointModel] = useState("");
     const stats = useMemo(
@@ -166,6 +169,35 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
             return payload.user;
         } catch (error) {
             message.error(error instanceof Error ? error.message : "更新用户失败");
+            return null;
+        } finally {
+            setUpdatingUserId(null);
+        }
+    };
+
+    const createUser = async (value: UserEditorValue) => {
+        setUpdatingUserId("__new__");
+        try {
+            const response = await fetch("/api/admin/users", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    username: value.username || "",
+                    displayName: value.displayName,
+                    email: value.email || "",
+                    password: value.password || "",
+                    role: value.role,
+                    status: value.status,
+                    pointsBalance: toNumberOrZero(value.pointsBalance),
+                }),
+            });
+            const payload = (await response.json()) as { user?: PublicUser; error?: string };
+            if (!response.ok || !payload.user) throw new Error(payload.error || "Create user failed");
+            setUsers((items) => [payload.user!, ...items]);
+            message.success("用户已新增");
+            return payload.user;
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "Create user failed");
             return null;
         } finally {
             setUpdatingUserId(null);
@@ -370,6 +402,26 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
         setSettings((current) => ({ ...current, site: { ...current.site, [key]: value } }));
     };
 
+    const uploadSiteLogo = (file?: File) => {
+        if (!file) return;
+        const allowed = ["image/png", "image/jpeg", "image/svg+xml"];
+        if (!allowed.includes(file.type)) {
+            message.warning("Logo 仅支持 PNG、JPG、SVG");
+            return;
+        }
+        if (file.size > 300 * 1024) {
+            message.warning("Logo 文件不能超过 300KB");
+            return;
+        }
+        const reader = new FileReader();
+        reader.onload = () => {
+            updateSiteSetting("logoUrl", String(reader.result || ""));
+            message.success("Logo 已读取，保存设置后生效");
+        };
+        reader.onerror = () => message.error("Logo 读取失败");
+        reader.readAsDataURL(file);
+    };
+
     const updateSiteSocialSetting = (key: SiteSocialKey, patch: Partial<AuthSettings["site"]["socials"][SiteSocialKey]>) => {
         setSettings((current) => ({
             ...current,
@@ -453,16 +505,29 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
     };
 
     const openUserEditor = (user: PublicUser) => {
+        setCreatingUser(false);
         setEditingUser(user);
-        userForm.setFieldsValue({ displayName: user.displayName, email: user.email || "", password: "", role: user.role, status: user.status, pointsBalance: user.pointsBalance });
+        userForm.setFieldsValue({ username: user.username, displayName: user.displayName, email: user.email || "", password: "", role: user.role, status: user.status, pointsBalance: user.pointsBalance });
+    };
+
+    const openCreateUserEditor = () => {
+        setEditingUser(null);
+        setCreatingUser(true);
+        userForm.setFieldsValue({ username: "", displayName: "", email: "", password: "", role: "user", status: "active", pointsBalance: settings.defaultPoints });
     };
 
     const closeUserEditor = () => {
         setEditingUser(null);
+        setCreatingUser(false);
         userForm.resetFields();
     };
 
     const saveUserEditor = async (value: UserEditorValue) => {
+        if (creatingUser) {
+            const user = await createUser(value);
+            if (user) closeUserEditor();
+            return;
+        }
         if (!editingUser) return;
         const user = await updateUser(editingUser.id, {
             displayName: value.displayName,
@@ -620,11 +685,16 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                                             <Input value={settings.site.title} maxLength={40} placeholder="VOZEB" onChange={(event) => updateSiteSetting("title", event.target.value)} />
                                         </LabeledControl>
                                         <LabeledControl label="Logo URL">
-                                            <Input value={settings.site.logoUrl} maxLength={2000} placeholder="/logo.svg 或 https://..." onChange={(event) => updateSiteSetting("logoUrl", event.target.value)} />
+                                            <div className="flex gap-2">
+                                                <Input value={settings.site.logoUrl} maxLength={2000} placeholder="/logo.svg 或 https://..." onChange={(event) => updateSiteSetting("logoUrl", event.target.value)} />
+                                                <Button icon={<Upload className="size-4" />} onClick={() => logoInputRef.current?.click()}>
+                                                    上传
+                                                </Button>
+                                            </div>
                                         </LabeledControl>
                                     </div>
                                     <div className="rounded-md border border-dashed border-stone-300 bg-white p-3 text-xs leading-5 text-stone-500 dark:border-stone-700 dark:bg-stone-950 dark:text-stone-400">
-                                        Logo 支持站内路径、远程 URL 或 data:image。Docker 部署时建议使用远程图床或把文件放到镜像内的 public 目录。
+                                        Logo 支持站内路径、远程 URL、data:image 或本地上传。上传支持 PNG、JPG、SVG，最大 300KB；Docker 部署也可直接使用 data:image。
                                     </div>
 
                                     <div className="border-t border-stone-200 pt-5 dark:border-stone-800">
@@ -923,7 +993,7 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                             title="用户管理"
                             description="调整角色、账号状态和积分余额。"
                             actions={
-                                <Button href="/register" icon={<Plus className="size-4" />}>
+                                <Button icon={<Plus className="size-4" />} onClick={openCreateUserEditor}>
                                     新增用户
                                 </Button>
                             }
@@ -1057,26 +1127,31 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
             </div>
 
             <Modal
-                title={editingUser ? `用户管理：${editingUser.displayName}` : "用户管理"}
-                open={Boolean(editingUser)}
-                okText="保存"
+                title={creatingUser ? "新增用户" : editingUser ? `用户管理：${editingUser.displayName}` : "用户管理"}
+                open={creatingUser || Boolean(editingUser)}
+                okText={creatingUser ? "新增" : "保存"}
                 cancelText="取消"
-                confirmLoading={Boolean(editingUser && updatingUserId === editingUser.id)}
+                confirmLoading={creatingUser ? updatingUserId === "__new__" : Boolean(editingUser && updatingUserId === editingUser.id)}
                 onOk={() => userForm.submit()}
                 onCancel={closeUserEditor}
             >
                 <Form form={userForm} layout="vertical" requiredMark={false} onFinish={saveUserEditor}>
                     <div className="grid gap-4 md:grid-cols-2">
+                        <Form.Item label="用户名" name="username" rules={[{ required: creatingUser, message: "请输入用户名" }]}>
+                            <Input disabled={!creatingUser} placeholder="用于登录的账号" />
+                        </Form.Item>
                         <Form.Item label="显示昵称" name="displayName" rules={[{ required: true, message: "请输入显示昵称" }]}>
                             <Input placeholder="显示在顶部账号菜单" />
                         </Form.Item>
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-2">
                         <Form.Item label="绑定邮箱" name="email">
                             <Input placeholder="可留空" />
                         </Form.Item>
+                        <Form.Item label={creatingUser ? "登录密码" : "重置密码"} name="password" rules={[{ required: creatingUser, message: "请输入登录密码" }]} extra={creatingUser ? "至少 8 位，创建后用户可自行修改。" : "留空则不修改密码；填写后该用户需要重新登录。"}>
+                            <Input.Password placeholder="至少 8 位" />
+                        </Form.Item>
                     </div>
-                    <Form.Item label="重置密码" name="password" extra="留空则不修改密码；填写后该用户需要重新登录。">
-                        <Input.Password placeholder="至少 8 位" />
-                    </Form.Item>
                     <div className="grid gap-4 md:grid-cols-2">
                         <Form.Item label="角色" name="role" rules={[{ required: true, message: "请选择角色" }]}>
                             <Select
@@ -1102,6 +1177,16 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                     </Form.Item>
                 </Form>
             </Modal>
+            <input
+                ref={logoInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/svg+xml"
+                className="hidden"
+                onChange={(event) => {
+                    uploadSiteLogo(event.target.files?.[0]);
+                    event.target.value = "";
+                }}
+            />
         </div>
     );
 }
@@ -1112,23 +1197,23 @@ function Panel({ children }: { children: ReactNode }) {
 
 function AdminSectionNav({ activeKey, onChange }: { activeKey: AdminSectionKey; onChange: (key: AdminSectionKey) => void }) {
     return (
-        <aside className="min-w-0 xl:sticky xl:top-20 xl:self-start">
-            <div className="max-w-full overflow-x-auto rounded-lg border border-stone-200 bg-white p-2 shadow-sm shadow-stone-200/40 dark:border-stone-800 dark:bg-stone-950 dark:shadow-black/20">
-                <div className="flex gap-2 xl:flex-col">
+        <aside className="admin-section-nav min-w-0 xl:sticky xl:top-20 xl:self-start">
+            <div className="admin-section-nav-shell max-w-full overflow-x-auto rounded-lg border border-stone-200 bg-white p-2 shadow-sm shadow-stone-200/40 dark:border-stone-800 dark:bg-stone-950 dark:shadow-black/20">
+                <div className="admin-section-nav-list flex gap-2 xl:flex-col">
                     {adminSections.map((section) => {
                         const active = section.key === activeKey;
                         return (
                             <button
                                 key={section.key}
                                 type="button"
-                                className={`flex min-w-36 items-center gap-3 rounded-md px-3 py-3 text-left transition xl:min-w-0 ${
+                                className={`admin-section-nav-item flex min-w-36 items-center gap-3 rounded-md px-3 py-3 text-left transition xl:min-w-0 ${
                                     active
                                         ? "bg-stone-950 !text-white shadow-sm dark:bg-stone-900 dark:!text-white dark:ring-1 dark:ring-stone-700"
                                         : "text-stone-600 hover:bg-stone-100 hover:text-stone-950 dark:text-stone-300 dark:hover:bg-stone-900 dark:hover:text-white"
                                 }`}
                                 onClick={() => onChange(section.key)}
                             >
-                                <span className={`flex size-8 shrink-0 items-center justify-center rounded-md ${active ? "bg-white/15 !text-white dark:bg-stone-800" : "bg-stone-100 dark:bg-stone-900"}`}>{section.icon}</span>
+                                <span className={`admin-section-nav-icon flex size-8 shrink-0 items-center justify-center rounded-md ${active ? "bg-white/15 !text-white dark:bg-stone-800" : "bg-stone-100 dark:bg-stone-900"}`}>{section.icon}</span>
                                 <span className="min-w-0">
                                     <span className={`block text-sm font-semibold ${active ? "!text-white" : ""}`}>{section.label}</span>
                                     <span className={`mt-0.5 block truncate text-xs ${active ? "!text-white/75" : "text-stone-500 dark:text-stone-500"}`}>{section.shortDescription}</span>
