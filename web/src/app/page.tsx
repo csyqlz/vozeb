@@ -148,7 +148,6 @@ export default function HomePage() {
                 if (data.settings?.site) setSite((current) => ({ ...current, ...data.settings!.site }));
             })
             .catch(() => undefined);
-
     }, [setUser]);
 
     useEffect(() => {
@@ -229,7 +228,7 @@ export default function HomePage() {
                             <h1 className="ai-title-aurora max-w-6xl text-balance text-7xl font-semibold tracking-normal sm:text-8xl lg:text-[9rem] xl:text-[11rem]">{site.title || "VOZEB"}</h1>
                             <span className="hero-version-badge inline-flex items-center gap-2 rounded-lg border border-cyan-300/45 bg-white/82 px-3.5 py-2 text-sm font-semibold text-stone-700 shadow-sm shadow-cyan-950/5 dark:border-cyan-200/20 dark:bg-cyan-200/8 dark:text-cyan-100">
                                 <Sparkles className="size-4" />
-                                v0.8.2 创作入口
+                                v0.8.3 创作入口
                             </span>
                             <HeroCape />
                         </div>
@@ -330,7 +329,14 @@ export default function HomePage() {
                         ))}
                         {!promptShowcase.length
                             ? Array.from({ length: 4 }).map((_, index) => (
-                                  <div key={index} className={cn("rounded-lg border border-white/60 bg-white/50 shadow-sm shadow-stone-200/40 dark:border-white/10 dark:bg-white/5 dark:shadow-black/20", index === 0 && "md:col-span-2 md:row-span-2", index === 3 && "md:col-span-2")} />
+                                  <div
+                                      key={index}
+                                      className={cn(
+                                          "rounded-lg border border-white/60 bg-white/50 shadow-sm shadow-stone-200/40 dark:border-white/10 dark:bg-white/5 dark:shadow-black/20",
+                                          index === 0 && "md:col-span-2 md:row-span-2",
+                                          index === 3 && "md:col-span-2",
+                                      )}
+                                  />
                               ))
                             : null}
                     </div>

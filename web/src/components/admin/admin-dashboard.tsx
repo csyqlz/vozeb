@@ -916,7 +916,9 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                             />
                             <div className="grid gap-3 p-4 text-sm leading-6 text-stone-500 sm:grid-cols-2 sm:p-5 dark:text-stone-400">
                                 <div className="rounded-lg border border-stone-200 bg-stone-50/70 p-4 dark:border-stone-800 dark:bg-stone-900/40">备份包含 `.data/auth.json`，也就是账号、密码哈希、角色、额度、签到和网站设置。</div>
-                                <div className="rounded-lg border border-stone-200 bg-stone-50/70 p-4 dark:border-stone-800 dark:bg-stone-900/40">导入会先把当前数据快照保存到 `.data/restore-backups`，再恢复备份里的 `.data/prompts.json` 与 `.data/generation-logs.json` 等内容。</div>
+                                <div className="rounded-lg border border-stone-200 bg-stone-50/70 p-4 dark:border-stone-800 dark:bg-stone-900/40">
+                                    导入会先把当前数据快照保存到 `.data/restore-backups`，再恢复备份里的 `.data/prompts.json` 与 `.data/generation-logs.json` 等内容。
+                                </div>
                             </div>
                         </Panel>
                     </div>
@@ -1259,24 +1261,28 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                                 </Button>
                             }
                         />
-                        <div className="flex flex-col gap-3 border-b border-stone-200 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5 dark:border-stone-800">
-                            <Input
-                                allowClear
-                                className="w-full sm:max-w-xl"
-                                prefix={<Search className="size-4 text-stone-400" />}
-                                placeholder="搜索昵称、用户名、邮箱、角色或状态"
-                                value={userSearch}
-                                onChange={(event) => setUserSearch(event.target.value)}
-                            />
-                            <div className="flex w-full flex-wrap items-center justify-between gap-2 sm:w-auto sm:justify-end">
-                                <span className="text-sm text-stone-500 dark:text-stone-400">
-                                    已选 {selectedUserIds.length} / 显示 {filteredUsers.length}
-                                </span>
-                                <Popconfirm title="批量删除选中用户？" description="会逐个清理用户会话、签到和额度记录；当前账号和最后一个管理员会被系统阻止删除。" okText="删除" cancelText="取消" onConfirm={() => void bulkDeleteUsers()}>
-                                    <Button danger icon={<Trash2 className="size-4" />} disabled={!selectedUserIds.length} loading={bulkDeletingUsers}>
-                                        批量删除
-                                    </Button>
-                                </Popconfirm>
+                        <div className="border-b border-stone-200 bg-stone-50/45 p-4 sm:p-5 dark:border-stone-800 dark:bg-stone-900/20">
+                            <div className="grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-center">
+                                <Input
+                                    allowClear
+                                    className="w-full min-w-0 sm:max-w-2xl xl:max-w-3xl"
+                                    prefix={<Search className="size-4 text-stone-400" />}
+                                    placeholder="搜索昵称、用户名、邮箱、角色或状态"
+                                    value={userSearch}
+                                    onChange={(event) => setUserSearch(event.target.value)}
+                                />
+                                <div className="flex w-full flex-wrap items-center justify-between gap-2 xl:w-auto xl:justify-end">
+                                    <span className="inline-flex h-8 shrink-0 items-center rounded-md border border-stone-200 bg-white px-2.5 text-xs font-medium text-stone-600 dark:border-stone-800 dark:bg-stone-950 dark:text-stone-300">
+                                        已选 <strong className="mx-1 text-stone-950 dark:text-stone-100">{selectedUserIds.length}</strong>
+                                        <span className="mx-1 text-stone-300 dark:text-stone-700">/</span>
+                                        显示 <strong className="ml-1 text-stone-950 dark:text-stone-100">{filteredUsers.length}</strong>
+                                    </span>
+                                    <Popconfirm title="批量删除选中用户？" description="会逐个清理用户会话、签到和额度记录；当前账号和最后一个管理员会被系统阻止删除。" okText="删除" cancelText="取消" onConfirm={() => void bulkDeleteUsers()}>
+                                        <Button danger icon={<Trash2 className="size-4" />} disabled={!selectedUserIds.length} loading={bulkDeletingUsers}>
+                                            批量删除
+                                        </Button>
+                                    </Popconfirm>
+                                </div>
                             </div>
                         </div>
                         <Table
@@ -1402,7 +1408,13 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                                     <Button className="w-full sm:w-auto" onClick={resetGenerationLogFilters}>
                                         清除筛选
                                     </Button>
-                                    <Popconfirm title="删除选中的生成日志？" description="只删除后台日志和本地日志预览资源，不会删除用户账号或提示词库。" okText="删除" cancelText="取消" onConfirm={() => void deleteGenerationLogsByIds(selectedGenerationLogIds)}>
+                                    <Popconfirm
+                                        title="删除选中的生成日志？"
+                                        description="只删除后台日志和本地日志预览资源，不会删除用户账号或提示词库。"
+                                        okText="删除"
+                                        cancelText="取消"
+                                        onConfirm={() => void deleteGenerationLogsByIds(selectedGenerationLogIds)}
+                                    >
                                         <Button className="w-full sm:w-auto" danger disabled={!selectedGenerationLogIds.length} loading={bulkDeletingGenerationLogs} icon={<Trash2 className="size-4" />}>
                                             删除所选
                                         </Button>
@@ -1525,7 +1537,10 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                                     {prompts.map((prompt) => (
                                         <div key={prompt.id} className="rounded-lg border border-stone-200 bg-white p-3 dark:border-stone-800 dark:bg-stone-950">
                                             <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-3">
-                                                <Checkbox checked={selectedPromptIds.includes(prompt.id)} onChange={(event) => setSelectedPromptIds((ids) => (event.target.checked ? Array.from(new Set([...ids, prompt.id])) : ids.filter((id) => id !== prompt.id)))} />
+                                                <Checkbox
+                                                    checked={selectedPromptIds.includes(prompt.id)}
+                                                    onChange={(event) => setSelectedPromptIds((ids) => (event.target.checked ? Array.from(new Set([...ids, prompt.id])) : ids.filter((id) => id !== prompt.id)))}
+                                                />
                                                 <div className="min-w-0">
                                                     <div className="flex min-w-0 gap-3">
                                                         {prompt.coverUrl ? (
@@ -1563,15 +1578,7 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                                     ))}
                                     {!prompts.length && !promptsLoading ? <div className="rounded-lg border border-dashed border-stone-300 py-12 text-center text-sm text-stone-500 dark:border-stone-700">暂无提示词</div> : null}
                                     {promptListTotal > PROMPT_PAGE_SIZE ? (
-                                        <Pagination
-                                            className="pt-1"
-                                            current={promptPage}
-                                            pageSize={PROMPT_PAGE_SIZE}
-                                            total={promptListTotal}
-                                            showSizeChanger={false}
-                                            size="small"
-                                            onChange={(page) => setPromptPage(page)}
-                                        />
+                                        <Pagination className="pt-1" current={promptPage} pageSize={PROMPT_PAGE_SIZE} total={promptListTotal} showSizeChanger={false} size="small" onChange={(page) => setPromptPage(page)} />
                                     ) : null}
                                 </div>
                                 <div className="hidden md:block">
@@ -1624,7 +1631,12 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                         <Form.Item label="绑定邮箱" name="email">
                             <Input placeholder="可留空" />
                         </Form.Item>
-                        <Form.Item label={creatingUser ? "登录密码" : "重置密码"} name="password" rules={[{ required: creatingUser, message: "请输入登录密码" }]} extra={creatingUser ? "至少 8 位，创建后用户可自行修改。" : "留空则不修改密码；填写后该用户需要重新登录。"}>
+                        <Form.Item
+                            label={creatingUser ? "登录密码" : "重置密码"}
+                            name="password"
+                            rules={[{ required: creatingUser, message: "请输入登录密码" }]}
+                            extra={creatingUser ? "至少 8 位，创建后用户可自行修改。" : "留空则不修改密码；填写后该用户需要重新登录。"}
+                        >
                             <Input.Password placeholder="至少 8 位" />
                         </Form.Item>
                     </div>
@@ -1677,12 +1689,14 @@ function Panel({ children }: { children: ReactNode }) {
 function GenerationLogAssetPreview({ log }: { log: StoredGenerationLog }) {
     const asset = log.assets[0];
     if (!asset?.url) {
-        return <div className="flex size-12 items-center justify-center rounded-lg border border-stone-200 bg-stone-100 text-stone-400 dark:border-stone-800 dark:bg-stone-900">{log.kind === "video" ? <Film className="size-4" /> : <ImageIcon className="size-4" />}</div>;
+        return (
+            <div className="flex size-12 items-center justify-center rounded-lg border border-stone-200 bg-stone-100 text-stone-400 dark:border-stone-800 dark:bg-stone-900">
+                {log.kind === "video" ? <Film className="size-4" /> : <ImageIcon className="size-4" />}
+            </div>
+        );
     }
     if (asset.type === "video") {
-        return (
-            <video className="size-12 rounded-lg border border-stone-200 bg-stone-100 object-cover dark:border-stone-800 dark:bg-stone-900" src={asset.url} muted playsInline preload="metadata" />
-        );
+        return <video className="size-12 rounded-lg border border-stone-200 bg-stone-100 object-cover dark:border-stone-800 dark:bg-stone-900" src={asset.url} muted playsInline preload="metadata" />;
     }
     return <img className="size-12 rounded-lg border border-stone-200 bg-stone-100 object-cover dark:border-stone-800 dark:bg-stone-900" src={asset.url} alt="" loading="lazy" referrerPolicy="no-referrer" />;
 }
@@ -1740,7 +1754,11 @@ function GenerationLogDetail({ log }: { log: StoredGenerationLog }) {
             </div>
             {asset?.url ? (
                 <div className="rounded-lg border border-stone-200 p-3 dark:border-stone-800">
-                    {asset.type === "video" ? <video className="max-h-[420px] w-full rounded-md bg-black object-contain" src={asset.url} controls playsInline /> : <img className="max-h-[420px] w-full rounded-md bg-stone-100 object-contain dark:bg-stone-900" src={asset.url} alt="" referrerPolicy="no-referrer" />}
+                    {asset.type === "video" ? (
+                        <video className="max-h-[420px] w-full rounded-md bg-black object-contain" src={asset.url} controls playsInline />
+                    ) : (
+                        <img className="max-h-[420px] w-full rounded-md bg-stone-100 object-contain dark:bg-stone-900" src={asset.url} alt="" referrerPolicy="no-referrer" />
+                    )}
                     <div className="mt-2 break-all text-xs text-stone-500 dark:text-stone-400">{asset.url}</div>
                 </div>
             ) : null}

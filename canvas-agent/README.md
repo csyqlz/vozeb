@@ -2,6 +2,10 @@
 
 本地 Canvas Agent 用来连接画布网页和用户电脑上的 Codex / Claude Code。本地开发时优先连接 `http://localhost:3000`，不需要先使用线上站点。
 
+## VOZEB 维护说明
+
+本目录属于 VOZEB 仓库的一部分，仓库版本、部署说明和网页端更新记录以根目录 `VERSION` 与 `CHANGELOG.md` 为准。npm 包名仍保留 `@basketikun/canvas-agent`，用于兼容已经安装的 MCP、Codex 插件和 Claude Code 配置。
+
 ## 启动
 
 ```bash

@@ -2,6 +2,10 @@
 
 这个插件把 VOZEB Canvas 的本地 Canvas Agent MCP 打包给 Codex app 使用，让 Codex 能打开本地画布、读取当前节点、创建内容并触发生成流程。
 
+## 版本与命名
+
+插件显示名统一使用 `VOZEB Canvas`，MCP 名称使用 `vozeb-canvas`。插件目录跟随主仓库维护，功能说明和安装路径以本 README、根目录 README 与 `CHANGELOG.md` 为准；连续版本的 GitHub Release 只写当前版本更新，只有版本断层时才补齐中间版本。
+
 ## 安装
 
 ### AI 自动安装
