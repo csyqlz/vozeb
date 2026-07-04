@@ -16,9 +16,9 @@ import { imageReferenceLabel } from "@/lib/image-reference-prompt";
 import { modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { nanoid } from "nanoid";
-import { formatBytes, formatDuration, getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
+import { formatBytes, formatDuration } from "@/lib/image-utils";
 import { APP_STORAGE_NAME, LEGACY_APP_STORAGE_NAME } from "@/lib/storage-keys";
-import { requestEdit, requestGeneration } from "@/services/api/image";
+import { createImageGenerationTask, waitForImageGenerationTask } from "@/services/api/image";
 import { deleteStoredImages, resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { useAssetStore } from "@/stores/use-asset-store";
 import type { ReferenceImage } from "@/types/image";
@@ -27,6 +27,7 @@ type GeneratedImage = {
     id: string;
     dataUrl: string;
     storageKey?: string;
+    slotIndex?: number;
     durationMs: number;
     width: number;
     height: number;
@@ -34,11 +35,27 @@ type GeneratedImage = {
     mimeType?: string;
 };
 
+type PendingImageTask = {
+    resultId: string;
+    taskId: string;
+    kind: "generation" | "edit";
+    model: string;
+    index: number;
+    startedAt: number;
+};
+
+type GenerationFailure = {
+    resultId: string;
+    index: number;
+    error: string;
+};
+
 type GenerationResult = {
     id: string;
     status: "pending" | "success" | "failed";
     image?: GeneratedImage;
     error?: string;
+    task?: PendingImageTask;
 };
 
 type GenerationLog = {
@@ -56,12 +73,17 @@ type GenerationLog = {
     imageCount: number;
     size: string;
     quality: string;
-    status: "成功" | "失败";
+    status: "成功" | "失败" | "生成中";
     images: GeneratedImage[];
     thumbnails: string[];
+    pendingCount?: number;
+    error?: string;
+    imageTasks?: PendingImageTask[];
+    failures?: GenerationFailure[];
 };
 
 type GenerationLogConfig = Pick<AiConfig, "model" | "imageModel" | "quality" | "size" | "count">;
+type GenerationSnapshot = { text: string; config: AiConfig; references: ReferenceImage[] };
 
 type UpdateAiConfig = <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
 
@@ -92,6 +114,12 @@ export default function ImagePage() {
     const [selectedLogIds, setSelectedLogIds] = useState<string[]>([]);
     const [previewLog, setPreviewLog] = useState<GenerationLog | null>(null);
     const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+    const [runningLogId, setRunningLogId] = useState<string | null>(null);
+    const resultsByLogIdRef = useRef(new Map<string, GenerationResult[]>());
+    const logsRef = useRef<GenerationLog[]>([]);
+    const activeLogIdRef = useRef<string | null>(null);
+    const taskControllersRef = useRef(new Map<string, AbortController>());
+    const logWriteQueuesRef = useRef(new Map<string, Promise<unknown>>());
 
     const model = effectiveConfig.imageModel || effectiveConfig.model;
     const canGenerate = Boolean(prompt.trim());
@@ -106,6 +134,13 @@ export default function ImagePage() {
 
     useEffect(() => {
         void refreshLogs();
+    }, []);
+
+    useEffect(() => {
+        return () => {
+            taskControllersRef.current.forEach((controller) => controller.abort());
+            taskControllersRef.current.clear();
+        };
     }, []);
 
     const addReferences = async (files?: FileList | null) => {
@@ -140,6 +175,129 @@ export default function ImagePage() {
         }
     };
 
+    function replaceLogs(nextLogs: GenerationLog[]) {
+        logsRef.current = nextLogs;
+        setLogs(nextLogs);
+        const activeLogId = activeLogIdRef.current;
+        if (activeLogId) {
+            const nextActiveLog = nextLogs.find((log) => log.id === activeLogId);
+            if (nextActiveLog) setPreviewLog(nextActiveLog);
+        }
+        resumePendingLogs(nextLogs);
+    }
+
+    function upsertLog(log: GenerationLog) {
+        replaceLogs([log, ...logsRef.current.filter((item) => item.id !== log.id)].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)));
+        if (activeLogIdRef.current === log.id) setPreviewLog(log);
+    }
+
+    const saveLog = async (log: GenerationLog) => {
+        upsertLog(log);
+        const previousWrite = logWriteQueuesRef.current.get(log.id) || Promise.resolve();
+        const nextWrite = previousWrite.catch(() => {}).then(() => logStore.setItem(log.id, serializeLog(log)));
+        logWriteQueuesRef.current.set(log.id, nextWrite);
+        await nextWrite;
+        if (logWriteQueuesRef.current.get(log.id) === nextWrite) logWriteQueuesRef.current.delete(log.id);
+    };
+
+    function getLatestLog(logId: string) {
+        return logsRef.current.find((log) => log.id === logId) || null;
+    }
+
+    function getLogResults(log: GenerationLog) {
+        const cached = resultsByLogIdRef.current.get(log.id);
+        if (cached) return cached;
+        const nextResults = resultsFromLog(log);
+        resultsByLogIdRef.current.set(log.id, nextResults);
+        return nextResults;
+    }
+
+    function setLogResults(logId: string, nextResults: GenerationResult[]) {
+        resultsByLogIdRef.current.set(logId, nextResults);
+        if (activeLogIdRef.current === logId) setResults(nextResults);
+    }
+
+    function persistLogResults(logId: string, snapshot: GenerationSnapshot, nextResults: GenerationResult[], durationMs: number, error?: string) {
+        const baseLog = getLatestLog(logId);
+        if (!baseLog) return null;
+        const nextLog = buildLogFromResults(baseLog, snapshot, nextResults, durationMs, String(Math.max(1, nextResults.length)), error);
+        void saveLog(nextLog);
+        return nextLog;
+    }
+
+    function patchLogResult(logId: string, resultId: string, patch: Partial<GenerationResult>, snapshot: GenerationSnapshot, durationMs: number, fallbackIndex = 0) {
+        const log = getLatestLog(logId);
+        if (!log) return [];
+        const currentResults = getLogResults(log);
+        let matched = false;
+        const nextResults = currentResults.map((item) => {
+            if (item.id !== resultId) return item;
+            matched = true;
+            return { ...item, ...patch, id: resultId };
+        });
+        if (!matched) {
+            nextResults.push({ id: resultId, status: patch.status || "pending", ...patch });
+        }
+        setLogResults(logId, nextResults);
+        persistLogResults(logId, snapshot, nextResults, durationMs);
+        return nextResults;
+    }
+
+    function patchLogResultAt(logId: string, index: number, patch: Partial<GenerationResult>, snapshot: GenerationSnapshot, durationMs: number) {
+        const log = getLatestLog(logId);
+        if (!log) return [];
+        const currentResults = getLogResults(log);
+        const nextResults = updateResultAt(currentResults, index, patch);
+        setLogResults(logId, nextResults);
+        persistLogResults(logId, snapshot, nextResults, durationMs);
+        return nextResults;
+    }
+
+    function resumePendingLogs(nextLogs: GenerationLog[]) {
+        nextLogs.forEach((log) => {
+            const snapshot = snapshotFromLog(log, effectiveConfig);
+            (log.imageTasks || []).forEach((pendingTask) => {
+                const controllerKey = `${log.id}:${pendingTask.resultId}:${pendingTask.taskId}`;
+                if (taskControllersRef.current.has(controllerKey)) return;
+                const controller = new AbortController();
+                taskControllersRef.current.set(controllerKey, controller);
+                void completeGenerationTask(log.id, pendingTask.resultId, pendingTask.index, snapshot, pendingTask, controller)
+                    .catch((error) => {
+                        if (controller.signal.aborted) return;
+                        const durationMs = Math.max(log.durationMs || 0, Date.now() - pendingTask.startedAt);
+                        patchLogResult(
+                            log.id,
+                            pendingTask.resultId,
+                            { status: "failed", error: error instanceof Error ? error.message : "生成失败", image: undefined, task: undefined },
+                            snapshot,
+                            durationMs,
+                            pendingTask.index,
+                        );
+                    })
+                    .finally(() => taskControllersRef.current.delete(controllerKey));
+            });
+        });
+    }
+
+    async function completeGenerationTask(logId: string, resultId: string, index: number, snapshot: GenerationSnapshot, pendingTask: PendingImageTask, controller?: AbortController) {
+        const result = await waitForImageGenerationTask(snapshot.config, { id: pendingTask.taskId, kind: pendingTask.kind, model: pendingTask.model }, { signal: controller?.signal });
+        const stored = await uploadImage(result.dataUrl);
+        const durationMs = Date.now() - pendingTask.startedAt;
+        const nextImage: GeneratedImage = {
+            id: resultId,
+            dataUrl: stored.url,
+            storageKey: stored.storageKey,
+            slotIndex: index,
+            durationMs,
+            width: stored.width,
+            height: stored.height,
+            bytes: stored.bytes,
+            mimeType: stored.mimeType,
+        };
+        patchLogResult(logId, resultId, { status: "success", image: nextImage, error: undefined, task: undefined }, snapshot, durationMs, index);
+        return nextImage;
+    }
+
     const generate = async () => {
         const text = prompt.trim();
         if (!text) {
@@ -155,44 +313,46 @@ export default function ImagePage() {
         const snapshot = buildRequestSnapshot();
         if (!snapshot) return;
 
+        const existingLog = previewLog ? getLatestLog(previewLog.id) || previewLog : null;
+        const baseResults = existingLog ? getLogResults(existingLog) : [];
+        const batchStartedAt = performance.now();
+        const baseDurationMs = existingLog?.durationMs || 0;
+        const startedResults = [
+            ...baseResults,
+            ...Array.from({ length: generationCount }, (_, offset) => ({
+                id: nanoid(),
+                status: "pending" as const,
+                task: undefined,
+                error: undefined,
+                image: undefined,
+                slotIndex: baseResults.length + offset,
+            })),
+        ];
+        const pendingLog = buildLogFromResults(existingLog, snapshot, startedResults, baseDurationMs, String(startedResults.length));
+        const logId = pendingLog.id;
+
         setElapsedMs(0);
         setRunning(true);
-        setPreviewLog(null);
-        setResults(Array.from({ length: generationCount }, () => ({ id: nanoid(), status: "pending" })));
-        const batchStartedAt = performance.now();
+        setRunningLogId(logId);
         setStartedAt(batchStartedAt);
+        activeLogIdRef.current = logId;
+        setPreviewLog(pendingLog);
+        setLogResults(logId, startedResults);
+        await saveLog(pendingLog);
 
-        const tasks = Array.from({ length: generationCount }, (_, index) => runGenerationSlot(index, snapshot));
+        const tasks = startedResults.slice(baseResults.length).map((result, offset) => runGenerationSlot(logId, result.id, baseResults.length + offset, snapshot, batchStartedAt, baseDurationMs));
 
         const result = await Promise.allSettled(tasks);
-        const successImages = result.filter((item): item is PromiseFulfilledResult<GeneratedImage> => item.status === "fulfilled").map((item) => item.value);
-        const successCount = successImages.length;
-        const failCount = generationCount - successCount;
         const failed = result.find((item): item is PromiseRejectedResult => item.status === "rejected");
 
         try {
-            const logImages = await Promise.all(
-                successImages.map(async (image) => {
-                    const stored = await uploadImage(image.dataUrl);
-                    return { ...image, dataUrl: stored.url, storageKey: stored.storageKey, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType };
-                }),
-            );
-            saveLog(
-                buildLog({
-                    prompt: text,
-                    model,
-                    config: { ...snapshot.config, count: String(generationCount) },
-                    references: snapshot.references,
-                    durationMs: performance.now() - batchStartedAt,
-                    successCount,
-                    failCount,
-                    status: successCount ? "成功" : "失败",
-                    images: logImages,
-                }),
-            );
-            successCount ? message.success("图片已生成") : message.error(failed?.reason instanceof Error ? failed.reason.message : "生成失败");
+            const finalResults = resultsByLogIdRef.current.get(logId) || startedResults;
+            const finalLog = buildLogFromResults(existingLog || pendingLog, snapshot, finalResults, baseDurationMs + performance.now() - batchStartedAt, String(finalResults.length), failed?.reason instanceof Error ? failed.reason.message : undefined);
+            await saveLog(finalLog);
+            finalLog.successCount ? message.success("图片已生成") : message.error(failed?.reason instanceof Error ? failed.reason.message : "生成失败");
         } finally {
             setRunning(false);
+            setRunningLogId(null);
         }
     };
 
@@ -240,35 +400,36 @@ export default function ImagePage() {
         setStartedAt(0);
         setSelectedLogIds([]);
         setPreviewLog(null);
+        activeLogIdRef.current = null;
     };
 
     const deleteSelectedLogs = () => {
         const imageKeys = logs.filter((log) => selectedLogIds.includes(log.id)).flatMap((log) => log.images.map((image) => image.storageKey).filter((key): key is string => Boolean(key)));
         void Promise.all([deleteStoredImages(imageKeys), ...selectedLogIds.flatMap((id) => [logStore.removeItem(id), legacyLogStore.removeItem(id)])]).then(refreshLogs);
+        selectedLogIds.forEach((id) => resultsByLogIdRef.current.delete(id));
         if (previewLog && selectedLogIds.includes(previewLog.id)) {
             setPreviewLog(null);
             setResults([]);
+            activeLogIdRef.current = null;
         }
         setSelectedLogIds([]);
         setDeleteConfirmOpen(false);
     };
 
-    const saveLog = (log: GenerationLog) => {
-        void logStore.setItem(log.id, serializeLog(log)).then(refreshLogs);
-    };
-
-    const refreshLogs = async () => setLogs(await readStoredLogs());
+    const refreshLogs = async () => replaceLogs(await readStoredLogs());
 
     const previewGenerationLog = async (log: GenerationLog) => {
-        setPreviewLog(log);
+        const currentLog = getLatestLog(log.id) || log;
+        activeLogIdRef.current = currentLog.id;
+        setPreviewLog(currentLog);
         setLogsOpen(false);
-        setPrompt(log.prompt);
-        setReferences(log.references || []);
-        if (log.config.imageModel || log.model) updateConfig("imageModel", log.config.imageModel || log.model);
-        if (log.config.quality) updateConfig("quality", log.config.quality);
-        if (log.config.size) updateConfig("size", log.config.size);
-        if (log.config.count) updateConfig("count", log.config.count);
-        setResults(log.images.map((image) => ({ id: image.id, status: "success", image })));
+        setPrompt(currentLog.prompt);
+        setReferences(currentLog.references || []);
+        if (currentLog.config.imageModel || currentLog.model) updateConfig("imageModel", currentLog.config.imageModel || currentLog.model);
+        if (currentLog.config.quality) updateConfig("quality", currentLog.config.quality);
+        if (currentLog.config.size) updateConfig("size", currentLog.config.size);
+        if (currentLog.config.count) updateConfig("count", currentLog.config.count);
+        setLogResults(currentLog.id, getLogResults(currentLog));
     };
 
     const buildRequestSnapshot = () => {
@@ -285,28 +446,42 @@ export default function ImagePage() {
         return { text, config: { ...effectiveConfig, model, count: "1" }, references: [...references] };
     };
 
-    const runGenerationSlot = async (index: number, snapshot: { text: string; config: AiConfig; references: ReferenceImage[] }) => {
-        const itemStartedAt = performance.now();
+    const runGenerationSlot = async (logId: string, resultId: string, index: number, snapshot: GenerationSnapshot, batchStartedAt: number, baseDurationMs: number) => {
+        const itemStartedAt = Date.now();
         try {
-            const result = snapshot.references.length ? await requestEdit(snapshot.config, snapshot.text, snapshot.references) : await requestGeneration(snapshot.config, snapshot.text);
-            const image = result[0];
-            if (!image) throw new Error("接口没有返回图片");
-            const meta = await readImageMeta(image.dataUrl);
-            const nextImage = { id: image.id, dataUrl: image.dataUrl, durationMs: performance.now() - itemStartedAt, width: meta.width, height: meta.height, bytes: getDataUrlByteSize(image.dataUrl) };
-            setResults((value) => updateResultAt(value, index, { status: "success", image: nextImage }));
-            return nextImage;
+            const task = await createImageGenerationTask(snapshot.config, snapshot.text, snapshot.references);
+            const pendingTask: PendingImageTask = { resultId, taskId: task.id, kind: task.kind, model: task.model, index, startedAt: itemStartedAt };
+            const controllerKey = `${logId}:${resultId}:${task.id}`;
+            const controller = new AbortController();
+            taskControllersRef.current.set(controllerKey, controller);
+            patchLogResult(logId, resultId, { status: "pending", task: pendingTask, error: undefined, image: undefined }, snapshot, baseDurationMs + performance.now() - batchStartedAt, index);
+            return await completeGenerationTask(logId, resultId, index, snapshot, pendingTask, controller).finally(() => taskControllersRef.current.delete(controllerKey));
         } catch (error) {
-            setResults((value) => updateResultAt(value, index, { status: "failed", error: error instanceof Error ? error.message : "生成失败" }));
+            patchLogResult(logId, resultId, { status: "failed", error: error instanceof Error ? error.message : "生成失败", image: undefined, task: undefined }, snapshot, baseDurationMs + performance.now() - batchStartedAt, index);
             throw error;
         }
     };
 
     const retryResult = (index: number) => {
+        const currentLog = previewLog ? getLatestLog(previewLog.id) || previewLog : null;
+        if (!currentLog || running) return;
         const snapshot = buildRequestSnapshot();
         if (!snapshot) return;
-        setPreviewLog(null);
-        setResults((value) => updateResultAt(value, index, { status: "pending", error: undefined, image: undefined }));
-        void runGenerationSlot(index, snapshot).catch(() => {});
+        const currentResult = getLogResults(currentLog)[index];
+        if (!currentResult) return;
+        const batchStartedAt = performance.now();
+        setRunning(true);
+        setRunningLogId(currentLog.id);
+        setElapsedMs(0);
+        setStartedAt(batchStartedAt);
+        patchLogResultAt(currentLog.id, index, { status: "pending", error: undefined, image: undefined, task: undefined }, snapshot, currentLog.durationMs || 0);
+        void runGenerationSlot(currentLog.id, currentResult.id, index, snapshot, batchStartedAt, currentLog.durationMs || 0)
+            .then(() => message.success("图片已重新生成"))
+            .catch((error) => message.error(error instanceof Error ? error.message : "生成失败"))
+            .finally(() => {
+                setRunning(false);
+                setRunningLogId(null);
+            });
     };
 
     return (
@@ -429,17 +604,17 @@ export default function ImagePage() {
                             <div>
                                 <h2 className="text-xl font-semibold">生成结果</h2>
                             </div>
-                            {running ? <Tag className="m-0 px-2 py-1">等待 {formatDuration(elapsedMs)}</Tag> : null}
+                            {running && runningLogId === previewLog?.id ? <Tag className="m-0 px-2 py-1">等待 {formatDuration(elapsedMs)}</Tag> : null}
                         </div>
                         {results.length ? (
-                            <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-3">
+                            <div className={results.length === 1 ? "grid max-w-[560px] gap-4" : "grid gap-4 sm:grid-cols-2 2xl:grid-cols-3"}>
                                 {results.map((result, index) =>
                                     result.status === "success" && result.image ? (
-                                        <ResultImageCard key={result.id} image={result.image} index={index} onEdit={addResultToReferences} onDownload={downloadImage} onSaveAsset={saveResultToAssets} />
+                                        <ResultImageCard key={result.id} image={result.image} index={index} large={results.length === 1} onEdit={addResultToReferences} onDownload={downloadImage} onSaveAsset={saveResultToAssets} />
                                     ) : result.status === "failed" ? (
-                                        <FailedImageCard key={result.id} error={result.error || "生成失败"} onRetry={() => retryResult(index)} />
+                                        <FailedImageCard key={result.id} error={result.error || "生成失败"} large={results.length === 1} onRetry={() => retryResult(index)} />
                                     ) : (
-                                        <PendingImageCard key={result.id} />
+                                        <PendingImageCard key={result.id} large={results.length === 1} />
                                     ),
                                 )}
                             </div>
@@ -507,19 +682,21 @@ function GenerationSettings({ config, model, updateConfig, openConfigDialog }: {
 function ResultImageCard({
     image,
     index,
+    large,
     onEdit,
     onDownload,
     onSaveAsset,
 }: {
     image: GeneratedImage;
     index: number;
+    large?: boolean;
     onEdit: (image: GeneratedImage, index: number) => void;
     onDownload: (image: GeneratedImage, index: number) => void;
     onSaveAsset: (image: GeneratedImage, index: number) => void;
 }) {
     return (
         <div className="overflow-hidden rounded-lg border border-stone-200 bg-background dark:border-stone-800">
-            <Image src={image.dataUrl} alt={`生成结果 ${index + 1}`} className="aspect-square object-cover" />
+            <Image src={image.dataUrl} alt={`生成结果 ${index + 1}`} className={large ? "max-h-[560px] min-h-[320px] w-full bg-stone-50 object-contain dark:bg-stone-950" : "aspect-square w-full object-cover"} />
             <div className="space-y-2 border-t border-stone-200 px-3 py-2.5 dark:border-stone-800">
                 <div className="flex min-w-0 gap-x-2 gap-y-1 text-xs text-stone-500 dark:text-stone-400">
                     <span>
@@ -550,9 +727,9 @@ function ResultImageCard({
     );
 }
 
-function PendingImageCard() {
+function PendingImageCard({ large }: { large?: boolean }) {
     return (
-        <div className="relative aspect-square overflow-hidden rounded-lg border border-dashed border-stone-300 bg-stone-50 dark:border-stone-700 dark:bg-stone-900">
+        <div className={`relative overflow-hidden rounded-lg border border-dashed border-stone-300 bg-stone-50 dark:border-stone-700 dark:bg-stone-900 ${large ? "min-h-[320px]" : "aspect-square"}`}>
             <div
                 className="absolute inset-0 opacity-60"
                 style={{
@@ -568,10 +745,10 @@ function PendingImageCard() {
     );
 }
 
-function FailedImageCard({ error, onRetry }: { error: string; onRetry: () => void }) {
+function FailedImageCard({ error, large, onRetry }: { error: string; large?: boolean; onRetry: () => void }) {
     return (
         <div className="overflow-hidden rounded-lg border border-red-200 bg-red-50 dark:border-red-950 dark:bg-red-950/20">
-            <div className="flex aspect-square flex-col items-center justify-center gap-3 p-5 text-center">
+            <div className={`flex flex-col items-center justify-center gap-3 p-5 text-center ${large ? "min-h-[320px]" : "aspect-square"}`}>
                 <div className="text-sm font-medium text-red-600 dark:text-red-300">生成失败</div>
                 <Typography.Paragraph ellipsis={{ rows: 4 }} className="!mb-0 !text-xs !text-red-500 dark:!text-red-300">
                     {error}
@@ -679,6 +856,11 @@ function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: Ge
                                 失败 {log.failCount}
                             </Tag>
                         ) : null}
+                        {log.pendingCount ? (
+                            <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none" color="processing">
+                                生成中 {log.pendingCount}
+                            </Tag>
+                        ) : null}
                     </div>
                     <div className="flex flex-wrap justify-end gap-1">
                         <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none">{log.imageCount} 张</Tag>
@@ -729,6 +911,10 @@ async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog>
         })),
     );
     const config = normalizeLogConfig(log);
+    const imageTasks = (log.imageTasks || []).filter((task): task is PendingImageTask => Boolean(task?.resultId && task.taskId));
+    const failures = (log.failures || []).filter((failure): failure is GenerationFailure => Boolean(failure?.resultId));
+    const pendingCount = log.pendingCount ?? imageTasks.length;
+    const failCount = log.failCount ?? failures.length;
     return {
         id: log.id || nanoid(),
         createdAt: log.createdAt || Date.now(),
@@ -740,13 +926,17 @@ async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog>
         references,
         durationMs: log.durationMs || 0,
         successCount: log.successCount ?? log.imageCount ?? 0,
-        failCount: log.failCount || 0,
-        imageCount: log.imageCount || log.successCount || 0,
+        failCount,
+        pendingCount,
+        imageCount: log.imageCount || log.successCount || images.length + failCount + pendingCount,
         size: log.size || config.size || "",
         quality: log.quality || config.quality || "",
-        status: log.status || "成功",
+        status: pendingCount ? "生成中" : log.status || "成功",
         images,
         thumbnails: images.map((image) => image.dataUrl).filter(Boolean),
+        imageTasks,
+        failures,
+        error: log.error,
     };
 }
 
@@ -757,6 +947,36 @@ function serializeLog(log: GenerationLog): GenerationLog {
         images: log.images.map((image) => ({ ...image, dataUrl: image.storageKey ? "" : image.dataUrl })),
         thumbnails: [],
     };
+}
+
+function resultsFromLog(log: GenerationLog): GenerationResult[] {
+    const usedResultIds = new Set<string>();
+    const entries: Array<{ index: number; result: GenerationResult }> = [];
+    log.images.forEach((image, fallbackIndex) => {
+        usedResultIds.add(image.id);
+        entries.push({ index: image.slotIndex ?? fallbackIndex, result: { id: image.id, status: "success", image } });
+    });
+    (log.imageTasks || []).forEach((task, fallbackIndex) => {
+        if (usedResultIds.has(task.resultId)) return;
+        usedResultIds.add(task.resultId);
+        entries.push({ index: task.index ?? entries.length + fallbackIndex, result: { id: task.resultId, status: "pending", task } });
+    });
+    (log.failures || []).forEach((failure, fallbackIndex) => {
+        if (usedResultIds.has(failure.resultId)) return;
+        usedResultIds.add(failure.resultId);
+        entries.push({ index: failure.index ?? entries.length + fallbackIndex, result: { id: failure.resultId, status: "failed", error: failure.error || log.error || "生成失败" } });
+    });
+    const knownPendingCount = entries.filter((entry) => entry.result.status === "pending").length;
+    const missingPendingCount = Math.max(0, (log.pendingCount || 0) - knownPendingCount);
+    for (let index = 0; index < missingPendingCount; index += 1) {
+        entries.push({ index: entries.length, result: { id: `${log.id}-pending-${index}`, status: "pending" } });
+    }
+    const knownFailureCount = entries.filter((entry) => entry.result.status === "failed").length;
+    const missingFailureCount = Math.max(0, (log.failCount || 0) - knownFailureCount);
+    for (let index = 0; index < missingFailureCount; index += 1) {
+        entries.push({ index: entries.length, result: { id: `${log.id}-failed-${index}`, status: "failed", error: log.error || "生成失败" } });
+    }
+    return entries.sort((a, b) => a.index - b.index).map((entry) => entry.result);
 }
 
 function normalizeLogConfig(log: Partial<GenerationLog>): GenerationLogConfig {
@@ -787,7 +1007,36 @@ function ReferenceOrderButtons({ index, total, onMove }: { index: number; total:
     );
 }
 
+function buildLogFromResults(baseLog: GenerationLog | null, snapshot: GenerationSnapshot, results: GenerationResult[], durationMs: number, count: string, error?: string): GenerationLog {
+    const images = results.flatMap((item, index) => (item.status === "success" && item.image ? [{ ...item.image, id: item.id, slotIndex: item.image.slotIndex ?? index }] : []));
+    const imageTasks = results.flatMap((item, index) => (item.status === "pending" && item.task ? [{ ...item.task, resultId: item.id, index }] : []));
+    const failures = results.flatMap((item, index) => (item.status === "failed" ? [{ resultId: item.id, index, error: item.error || error || "生成失败" }] : []));
+    const pendingCount = results.filter((item) => item.status === "pending").length;
+    const failCount = failures.length;
+    const logConfig = buildLogConfig(snapshot.config, count);
+    const status: GenerationLog["status"] = pendingCount ? "生成中" : images.length ? "成功" : "失败";
+    const errorMessage = error || failures[0]?.error;
+    return buildLog({
+        baseLog,
+        prompt: snapshot.text,
+        model: snapshot.config.imageModel || snapshot.config.model,
+        config: logConfig,
+        references: snapshot.references,
+        durationMs,
+        successCount: images.length,
+        failCount,
+        pendingCount,
+        imageCount: Math.max(Number(count) || 0, results.length, images.length + failCount + pendingCount),
+        status,
+        images,
+        imageTasks,
+        failures,
+        error: errorMessage,
+    });
+}
+
 function buildLog({
+    baseLog,
     prompt,
     model,
     config,
@@ -795,9 +1044,15 @@ function buildLog({
     durationMs,
     successCount,
     failCount,
+    pendingCount,
+    imageCount,
     status,
     images,
+    imageTasks,
+    failures,
+    error,
 }: {
+    baseLog?: GenerationLog | null;
     prompt: string;
     model: string;
     config: GenerationLogConfig;
@@ -805,8 +1060,13 @@ function buildLog({
     durationMs: number;
     successCount: number;
     failCount: number;
+    pendingCount: number;
+    imageCount: number;
     status: GenerationLog["status"];
     images: GeneratedImage[];
+    imageTasks: PendingImageTask[];
+    failures: GenerationFailure[];
+    error?: string;
 }): GenerationLog {
     const logConfig = {
         model: config.model,
@@ -816,9 +1076,9 @@ function buildLog({
         count: config.count,
     };
     return {
-        id: nanoid(),
-        createdAt: Date.now(),
-        title: prompt.slice(0, 12) || "未命名",
+        id: baseLog?.id || nanoid(),
+        createdAt: baseLog?.createdAt || Date.now(),
+        title: baseLog?.title || prompt.slice(0, 12) || "未命名",
         prompt,
         time: new Date().toLocaleString("zh-CN", { hour12: false }),
         model,
@@ -827,11 +1087,40 @@ function buildLog({
         durationMs,
         successCount,
         failCount,
-        imageCount: Number(logConfig.count) || successCount,
+        pendingCount,
+        imageCount,
         size: logConfig.size,
         quality: logConfig.quality,
         status,
         images,
         thumbnails: images.map((image) => image.dataUrl).filter(Boolean),
+        imageTasks,
+        failures,
+        error,
+    };
+}
+
+function buildLogConfig(config: AiConfig, count: string): GenerationLogConfig {
+    return {
+        model: config.model,
+        imageModel: config.imageModel,
+        quality: config.quality,
+        size: config.size,
+        count,
+    };
+}
+
+function snapshotFromLog(log: GenerationLog, fallbackConfig: AiConfig): GenerationSnapshot {
+    const model = log.config.imageModel || log.model || fallbackConfig.imageModel || fallbackConfig.model;
+    return {
+        text: log.prompt,
+        references: log.references || [],
+        config: {
+            ...fallbackConfig,
+            ...log.config,
+            model,
+            imageModel: model,
+            count: "1",
+        },
     };
 }

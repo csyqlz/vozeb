@@ -305,9 +305,14 @@
     .auth-page-bg,
     .animated-dot-bg {
         background:
-            radial-gradient(ellipse 78% 42% at 50% 50%, rgba(255, 255, 255, 0.74), transparent 66%), radial-gradient(ellipse 90% 48% at 50% 96%, rgba(14, 165, 233, 0.16), transparent 62%),
-            radial-gradient(circle at 16% 22%, rgba(45, 212, 191, 0.08), transparent 28%), radial-gradient(circle at 86% 72%, rgba(96, 165, 250, 0.09), transparent 30%), linear-gradient(180deg, #f8fafc 0%, #edf8ff 48%, #f8fafc 100%);
+            radial-gradient(ellipse 78% 42% at 50% 48%, rgba(255, 255, 255, 0.96), transparent 66%),
+            radial-gradient(ellipse 92% 46% at 50% 98%, rgba(14, 165, 233, 0.08), transparent 64%),
+            radial-gradient(circle at 16% 22%, rgba(14, 165, 233, 0.04), transparent 28%),
+            radial-gradient(circle at 86% 72%, rgba(96, 165, 250, 0.05), transparent 30%),
+            linear-gradient(180deg, #ffffff 0%, #ffffff 58%, #f8fbff 100%);
+        background-color: #ffffff;
         isolation: isolate;
+        overflow-x: clip;
         position: relative;
     }
 
@@ -339,15 +344,17 @@
     }
 
     .landing-site-header {
-        background: rgba(255, 255, 255, 0.88);
+        background: rgba(255, 255, 255, 0.96);
         border-bottom: 1px solid rgba(15, 23, 42, 0.08);
-        box-shadow: 0 12px 34px rgba(15, 23, 42, 0.06);
+        box-shadow: 0 12px 34px rgba(15, 23, 42, 0.04);
         backdrop-filter: blur(18px);
         -webkit-backdrop-filter: blur(18px);
+        width: 100%;
+        z-index: 60;
     }
 
     .app-shell-header {
-        background: rgba(255, 255, 255, 0.9);
+        background: rgba(255, 255, 255, 0.96);
         border-bottom: 1px solid rgba(15, 23, 42, 0.08);
         box-shadow: 0 10px 28px rgba(15, 23, 42, 0.045);
         backdrop-filter: blur(18px);
@@ -913,15 +920,52 @@
     }
 
     @media (max-width: 760px) {
+        .auth-page-bg,
+        .animated-dot-bg {
+            max-width: 100vw;
+            overflow-x: clip;
+        }
+
         .landing-site-header > div {
+            display: flex;
             grid-template-columns: 1fr auto;
+            justify-content: space-between;
             height: 68px;
+            max-width: 100%;
             padding-inline: 16px;
+        }
+
+        .landing-site-header > div > a {
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+
+        .landing-site-header > div > div:last-child {
+            flex: 0 0 auto;
+            min-width: max-content;
         }
 
         .landing-site-header {
             position: sticky;
             top: 0;
+            z-index: 60;
+        }
+
+        .landing-hero-section {
+            align-items: flex-start;
+            min-height: auto;
+            padding: 0 14px 30px;
+            width: 100%;
+        }
+
+        .landing-hero-copy {
+            padding-top: 4px;
+        }
+
+        .landing-hero-copy p {
+            max-width: 100%;
+            overflow-wrap: anywhere;
+            text-wrap: wrap;
         }
 
         .landing-site-header .landing-login-button.ant-btn {
@@ -934,14 +978,33 @@
         }
 
         .hero-title-stage {
-            margin-top: 22px;
+            margin-top: 10px;
             padding-inline: 0;
+            padding-top: 8px;
+        }
+
+        .hero-version-badge {
+            font-size: 12px;
+            line-height: 1;
+            margin: 0 0 8px;
+            order: -1;
+            padding: 7px 10px;
         }
 
         .hero-cape {
-            height: 78px;
-            margin-top: -38px;
-            max-width: 96vw;
+            height: 64px;
+            margin-top: -28px;
+            max-width: min(100%, calc(100vw - 32px));
+        }
+
+        .landing-hero-actions {
+            gap: 10px;
+            margin-top: 22px;
+        }
+
+        .landing-capability-stage {
+            margin-top: 28px;
+            width: 100%;
         }
 
         .landing-showcase-section {
@@ -1093,8 +1156,10 @@
         }
 
         .landing-hero-cta.ant-btn {
+            flex: 1 1 0;
             height: 52px;
-            min-width: 152px;
+            max-width: 180px;
+            min-width: 0;
             padding-inline: 20px;
         }
 
@@ -1243,6 +1308,13 @@
 
     .landing-showcase-section {
         margin-top: -38px;
+    }
+
+    @media (max-width: 760px) {
+        .landing-showcase-section {
+            margin-top: 28px;
+            padding-inline: 14px;
+        }
     }
 
     .landing-showcase-shell {
@@ -1435,8 +1507,8 @@
     }
 
     .animated-dot-bg::after {
-        background-image: radial-gradient(ellipse 42% 30% at 50% 44%, rgba(255, 255, 255, 0.34), transparent 68%), linear-gradient(180deg, rgba(2, 6, 23, 0) 0%, rgba(2, 6, 23, 0.08) 42%, rgba(2, 6, 23, 0.18) 100%);
-        opacity: 0.48;
+        background-image: radial-gradient(ellipse 42% 30% at 50% 44%, rgba(255, 255, 255, 0.56), transparent 70%), linear-gradient(180deg, rgba(255, 255, 255, 0) 0%, rgba(248, 250, 252, 0.16) 100%);
+        opacity: 0.38;
     }
 
     .dark .animated-dot-bg::after {

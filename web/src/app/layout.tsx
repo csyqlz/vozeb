@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import Script from "next/script";
 import { AntdRegistry } from "@ant-design/nextjs-registry";
 import { AppProviders } from "@/components/layout/app-providers";
@@ -6,6 +6,12 @@ import { getAuthSettings } from "@/lib/auth/store";
 import "antd/dist/reset.css";
 import "./globals.css";
 import React from "react";
+
+export const viewport: Viewport = {
+    width: "device-width",
+    initialScale: 1,
+    viewportFit: "cover",
+};
 
 export async function generateMetadata(): Promise<Metadata> {
     const settings = await getAuthSettings();

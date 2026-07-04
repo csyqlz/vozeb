@@ -154,7 +154,7 @@ export default function HomePage() {
     }, [message, setUser]);
 
     return (
-        <main className="animated-dot-bg relative h-dvh overflow-y-auto bg-background text-stone-950 dark:text-stone-100">
+        <main className="animated-dot-bg relative h-dvh overflow-x-hidden overflow-y-auto bg-background text-stone-950 dark:text-stone-100">
             <header className="landing-site-header relative z-10">
                 <div className="mx-auto grid h-20 max-w-7xl grid-cols-[1fr_auto_1fr] items-center gap-4 px-6">
                     <Link href="/" className="inline-flex min-w-0 items-center gap-3 text-stone-950 dark:text-white">
@@ -177,7 +177,7 @@ export default function HomePage() {
                 </div>
             </header>
 
-            <section className="relative mx-auto flex min-h-[calc(100dvh-7rem)] max-w-[1500px] items-center justify-center px-6 pb-8 pt-4">
+            <section className="landing-hero-section relative mx-auto flex min-h-[calc(100dvh-7rem)] max-w-[1500px] items-center justify-center px-6 pb-8 pt-4">
                 <div className="landing-hero-copy relative z-10 mx-auto w-full max-w-7xl text-center">
                     <div className="hero-title-stage">
                         <div className="hero-title-wrap">

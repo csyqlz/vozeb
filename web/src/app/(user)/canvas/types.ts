@@ -61,6 +61,11 @@ export type CanvasNodeMetadata = {
         provider: "openai" | "seedance";
         model: string;
     };
+    imageTask?: {
+        id: string;
+        kind: CanvasImageGenerationType;
+        model: string;
+    };
 };
 
 export type CanvasNodeData = {

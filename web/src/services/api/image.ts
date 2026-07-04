@@ -84,6 +84,20 @@ type GeminiPayload = {
 };
 type GeminiStreamState = { buffer: string; text: string; toolCalls: ResponseToolCall[]; error?: string };
 type RequestOptions = { signal?: AbortSignal };
+export type ImageGenerationTask = {
+    id: string;
+    kind: "generation" | "edit";
+    model: string;
+    status?: "pending" | "running" | "success" | "error";
+};
+
+type ImageTaskPayload = {
+    task?: ImageGenerationTask & {
+        result?: { dataUrl?: string };
+        error?: string;
+    };
+    error?: string;
+};
 
 const QUALITY_BASE: Record<string, number> = {
     low: 1024,
@@ -104,6 +118,8 @@ const IMAGE_MAX_PIXELS = 8294400;
 const IMAGE_MAX_EDGE = 3840;
 const IMAGE_MAX_RATIO = 3;
 const IMAGE_OUTPUT_FORMAT = "png";
+const IMAGE_TASK_POLL_INTERVAL_MS = 1800;
+const IMAGE_TASK_TIMEOUT_MS = 30 * 60 * 1000;
 
 function normalizeQuality(quality: string) {
     const value = quality.trim().toLowerCase();
@@ -639,6 +655,65 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
     }
 }
 
+export async function createImageGenerationTask(config: AiConfig, prompt: string, references: ReferenceImage[] = [], mask?: ReferenceImage, options?: RequestOptions): Promise<ImageGenerationTask> {
+    const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
+    const taskReferences = await Promise.all(references.map(async (reference) => ({ id: reference.id, name: reference.name, type: reference.type, dataUrl: await imageToDataUrl(reference) })));
+    const taskMask = mask ? { id: mask.id, name: mask.name, type: mask.type, dataUrl: await imageToDataUrl(mask) } : undefined;
+    const response = await fetch("/api/image-tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            kind: references.length || mask ? "edit" : "generation",
+            config: {
+                apiSource: requestConfig.apiSource,
+                baseUrl: requestConfig.baseUrl,
+                apiKey: requestConfig.apiKey,
+                apiFormat: requestConfig.apiFormat,
+                model: requestConfig.model,
+                quality: requestConfig.quality,
+                size: requestConfig.size,
+                systemPrompt: requestConfig.systemPrompt,
+            },
+            prompt,
+            references: taskReferences,
+            mask: taskMask,
+        }),
+        signal: options?.signal,
+    });
+    syncUserPointsFromHeaders(response.headers, requestConfig.apiSource);
+    if (!response.ok) throw new Error(await readFetchError(response, "创建图片任务失败"));
+    const payload = (await response.json()) as ImageTaskPayload;
+    if (!payload.task?.id) throw new Error(payload.error || "创建图片任务失败");
+    return payload.task;
+}
+
+export async function waitForImageGenerationTask(config: AiConfig, task: ImageGenerationTask, options?: RequestOptions) {
+    const startedAt = Date.now();
+    for (;;) {
+        if (options?.signal?.aborted) throw new DOMException("请求已取消", "AbortError");
+        if (Date.now() - startedAt > IMAGE_TASK_TIMEOUT_MS) {
+            await refreshUserPointsIfSystem(config.apiSource);
+            throw new Error("图片生成超时，请稍后重试");
+        }
+        const response = await fetch(`/api/image-tasks/${encodeURIComponent(task.id)}`, { cache: "no-store", signal: options?.signal });
+        syncUserPointsFromHeaders(response.headers, config.apiSource);
+        if (!response.ok) throw new Error(await readFetchError(response, "读取图片任务失败"));
+        const payload = (await response.json()) as ImageTaskPayload;
+        const current = payload.task;
+        if (!current) throw new Error(payload.error || "图片任务不存在");
+        if (current.status === "success") {
+            if (!current.result?.dataUrl) throw new Error("图片任务没有返回结果");
+            await refreshUserPointsIfSystem(config.apiSource);
+            return { id: nanoid(), dataUrl: current.result.dataUrl };
+        }
+        if (current.status === "error") {
+            await refreshUserPointsIfSystem(config.apiSource);
+            throw new Error(current.error || "图片生成失败");
+        }
+        await delay(IMAGE_TASK_POLL_INTERVAL_MS, options?.signal);
+    }
+}
+
 export async function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[], mask?: ReferenceImage, options?: RequestOptions) {
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
@@ -740,6 +815,24 @@ export async function requestToolResponse(config: AiConfig, messages: ResponseIn
         await refreshUserPointsIfSystem(requestConfig.apiSource);
         throw new Error(readAxiosError(error, "请求失败"));
     }
+}
+
+function delay(ms: number, signal?: AbortSignal) {
+    return new Promise<void>((resolve, reject) => {
+        if (signal?.aborted) {
+            reject(new DOMException("请求已取消", "AbortError"));
+            return;
+        }
+        const timer = window.setTimeout(() => {
+            signal?.removeEventListener("abort", abort);
+            resolve();
+        }, ms);
+        const abort = () => {
+            window.clearTimeout(timer);
+            reject(new DOMException("请求已取消", "AbortError"));
+        };
+        signal?.addEventListener("abort", abort, { once: true });
+    });
 }
 
 export async function fetchImageModels(config: Pick<AiConfig, "baseUrl" | "apiKey" | "apiFormat">) {

@@ -1,9 +1,11 @@
 .next
+.data
 node_modules
 dist
 build
 coverage
 bun.lock
+pnpm-lock.yaml
 *.log
 *.ico
 *.png
