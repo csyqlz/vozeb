@@ -1302,86 +1302,82 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                     <Panel>
                         <PanelHeader title="生成日志" description="查看所有用户通过画布、图片工作台和视频创作台产生的图片/视频生成记录。" />
                         <div className="space-y-4 p-4 sm:p-5">
-                            <div className="flex min-w-0 flex-wrap gap-2.5">
-                                <Input
-                                    allowClear
-                                    className="min-w-0"
-                                    style={{ flex: "0 1 300px", maxWidth: 300, minWidth: 220 }}
-                                    prefix={<Search className="size-4 text-stone-400" />}
-                                    placeholder="搜索日志"
-                                    value={generationLogSearch}
-                                    onChange={(event) => {
-                                        setGenerationLogSearch(event.target.value);
-                                        setGenerationLogPage(1);
-                                    }}
-                                />
-                                <Select
-                                    allowClear
-                                    className="min-w-0"
-                                    style={{ flex: "0 0 118px", width: 118, minWidth: 0 }}
-                                    placeholder="类型"
-                                    value={generationLogKind || undefined}
-                                    onChange={(value) => {
-                                        setGenerationLogKind(value || "");
-                                        setGenerationLogPage(1);
-                                    }}
-                                    options={[
-                                        { label: "图片", value: "image" },
-                                        { label: "视频", value: "video" },
-                                    ]}
-                                />
-                                <Select
-                                    allowClear
-                                    className="min-w-0"
-                                    style={{ flex: "0 0 138px", width: 138, minWidth: 0 }}
-                                    placeholder="入口"
-                                    value={generationLogSource || undefined}
-                                    onChange={(value) => {
-                                        setGenerationLogSource(value || "");
-                                        setGenerationLogPage(1);
-                                    }}
-                                    options={[
-                                        { label: "画布", value: "canvas" },
-                                        { label: "生图工作台", value: "image-workbench" },
-                                        { label: "视频创作台", value: "video-workbench" },
-                                    ]}
-                                />
-                                <Select
-                                    allowClear
-                                    className="min-w-0"
-                                    style={{ flex: "0 0 118px", width: 118, minWidth: 0 }}
-                                    placeholder="状态"
-                                    value={generationLogStatus || undefined}
-                                    onChange={(value) => {
-                                        setGenerationLogStatus(value || "");
-                                        setGenerationLogPage(1);
-                                    }}
-                                    options={[
-                                        { label: "成功", value: "success" },
-                                        { label: "失败", value: "failed" },
-                                        { label: "生成中", value: "pending" },
-                                    ]}
-                                />
-                                <Select
-                                    allowClear
-                                    className="min-w-0"
-                                    style={{ flex: "0 1 160px", maxWidth: 180, minWidth: 132 }}
-                                    showSearch
-                                    placeholder="用户"
-                                    value={generationLogUserId || undefined}
-                                    optionFilterProp="label"
-                                    onChange={(value) => {
-                                        setGenerationLogUserId(value || "");
-                                        setGenerationLogPage(1);
-                                    }}
-                                    options={users.map((user) => ({ label: `${user.displayName} / ${user.username}`, value: user.id }))}
-                                />
+                            <div className="grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1fr)_330px] xl:items-start">
+                                <div className="grid min-w-0 grid-cols-2 gap-2.5 sm:grid-cols-[minmax(220px,300px)_118px_138px_118px_minmax(132px,180px)]">
+                                    <Input
+                                        allowClear
+                                        className="col-span-2 min-w-0 sm:col-span-1"
+                                        prefix={<Search className="size-4 text-stone-400" />}
+                                        placeholder="搜索日志"
+                                        value={generationLogSearch}
+                                        onChange={(event) => {
+                                            setGenerationLogSearch(event.target.value);
+                                            setGenerationLogPage(1);
+                                        }}
+                                    />
+                                    <Select
+                                        allowClear
+                                        className="min-w-0"
+                                        placeholder="类型"
+                                        value={generationLogKind || undefined}
+                                        onChange={(value) => {
+                                            setGenerationLogKind(value || "");
+                                            setGenerationLogPage(1);
+                                        }}
+                                        options={[
+                                            { label: "图片", value: "image" },
+                                            { label: "视频", value: "video" },
+                                        ]}
+                                    />
+                                    <Select
+                                        allowClear
+                                        className="min-w-0"
+                                        placeholder="入口"
+                                        value={generationLogSource || undefined}
+                                        onChange={(value) => {
+                                            setGenerationLogSource(value || "");
+                                            setGenerationLogPage(1);
+                                        }}
+                                        options={[
+                                            { label: "画布", value: "canvas" },
+                                            { label: "生图工作台", value: "image-workbench" },
+                                            { label: "视频创作台", value: "video-workbench" },
+                                        ]}
+                                    />
+                                    <Select
+                                        allowClear
+                                        className="min-w-0"
+                                        placeholder="状态"
+                                        value={generationLogStatus || undefined}
+                                        onChange={(value) => {
+                                            setGenerationLogStatus(value || "");
+                                            setGenerationLogPage(1);
+                                        }}
+                                        options={[
+                                            { label: "成功", value: "success" },
+                                            { label: "失败", value: "failed" },
+                                            { label: "生成中", value: "pending" },
+                                        ]}
+                                    />
+                                    <Select
+                                        allowClear
+                                        className="min-w-0"
+                                        showSearch
+                                        placeholder="用户"
+                                        value={generationLogUserId || undefined}
+                                        optionFilterProp="label"
+                                        onChange={(value) => {
+                                            setGenerationLogUserId(value || "");
+                                            setGenerationLogPage(1);
+                                        }}
+                                        options={users.map((user) => ({ label: `${user.displayName} / ${user.username}`, value: user.id }))}
+                                    />
+                                </div>
                                 <DatePicker.RangePicker
-                                    className="min-w-0 max-w-full"
-                                    style={{ flex: "0 1 236px", maxWidth: 236, minWidth: 210 }}
+                                    className="w-full min-w-0 max-w-full"
                                     allowClear
-                                    format="MM-DD"
-                                    placeholder={["开始", "结束"]}
+                                    format="YYYY-MM-DD"
+                                    placeholder={["开始日期", "结束日期"]}
                                     separator="至"
                                     value={generationLogStart || generationLogEnd ? [generationLogStart ? dayjs(generationLogStart) : null, generationLogEnd ? dayjs(generationLogEnd) : null] : null}
                                     onChange={(dates) => {
@@ -1396,16 +1392,18 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                                     <span>共 {generationLogTotal} 条</span>
                                     <span>已选 {selectedGenerationLogs.length} 条</span>
                                 </div>
-                                <div className="flex flex-wrap justify-end gap-2">
-                                    <Button icon={<RefreshCw className="size-4" />} loading={generationLogsLoading} onClick={() => void loadGenerationLogs()}>
+                                <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:justify-end">
+                                    <Button className="w-full sm:w-auto" icon={<RefreshCw className="size-4" />} loading={generationLogsLoading} onClick={() => void loadGenerationLogs()}>
                                         刷新
                                     </Button>
-                                    <Button disabled={!generationLogs.length} onClick={() => setSelectedGenerationLogIds(generationLogs.map((log) => log.id))}>
+                                    <Button className="w-full sm:w-auto" disabled={!generationLogs.length} onClick={() => setSelectedGenerationLogIds(generationLogs.map((log) => log.id))}>
                                         本页全选
                                     </Button>
-                                    <Button onClick={resetGenerationLogFilters}>清除筛选</Button>
+                                    <Button className="w-full sm:w-auto" onClick={resetGenerationLogFilters}>
+                                        清除筛选
+                                    </Button>
                                     <Popconfirm title="删除选中的生成日志？" description="只删除后台日志和本地日志预览资源，不会删除用户账号或提示词库。" okText="删除" cancelText="取消" onConfirm={() => void deleteGenerationLogsByIds(selectedGenerationLogIds)}>
-                                        <Button danger disabled={!selectedGenerationLogIds.length} loading={bulkDeletingGenerationLogs} icon={<Trash2 className="size-4" />}>
+                                        <Button className="w-full sm:w-auto" danger disabled={!selectedGenerationLogIds.length} loading={bulkDeletingGenerationLogs} icon={<Trash2 className="size-4" />}>
                                             删除所选
                                         </Button>
                                     </Popconfirm>
