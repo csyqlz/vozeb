@@ -46,6 +46,7 @@ export type AiConfig = {
     size: string;
     count: string;
     canvasImageCount: string;
+    modelPointCosts: Record<string, number>;
 };
 
 export type WebdavSyncConfig = {
@@ -100,7 +101,8 @@ export const defaultConfig: AiConfig = {
     quality: "auto",
     size: "1:1",
     count: "1",
-    canvasImageCount: "3",
+    canvasImageCount: "1",
+    modelPointCosts: {},
 };
 
 export const defaultWebdavSyncConfig: WebdavSyncConfig = {
@@ -117,6 +119,7 @@ type ConfigStore = {
     webdav: WebdavSyncConfig;
     isConfigOpen: boolean;
     shouldPromptContinue: boolean;
+    setConfig: (config: AiConfig) => void;
     updateConfig: <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
     updateWebdavConfig: <K extends keyof WebdavSyncConfig>(key: K, value: WebdavSyncConfig[K]) => void;
     isAiConfigReady: (config: AiConfig, model: string) => boolean;
@@ -190,6 +193,7 @@ export const useConfigStore = create<ConfigStore>()(
             webdav: defaultWebdavSyncConfig,
             isConfigOpen: false,
             shouldPromptContinue: false,
+            setConfig: (config) => set({ config }),
             updateConfig: (key, value) =>
                 set((state) => ({
                     config: {
@@ -242,7 +246,8 @@ export const useConfigStore = create<ConfigStore>()(
                         vquality: config.vquality || "720",
                         videoGenerateAudio: config.videoGenerateAudio || "true",
                         videoWatermark: config.videoWatermark || "false",
-                        canvasImageCount: config.canvasImageCount || "3",
+                        canvasImageCount: config.canvasImageCount || "1",
+                        modelPointCosts: isRecord(persistedConfig.modelPointCosts) ? normalizeModelPointCosts(persistedConfig.modelPointCosts) : {},
                         imageModels: Array.isArray(persistedConfig.imageModels) ? normalizeModelList(config.imageModels, channels) : filterModelsByCapability(models, "image"),
                         videoModels: Array.isArray(persistedConfig.videoModels) ? normalizeModelList(config.videoModels, channels) : filterModelsByCapability(models, "video"),
                         textModels: Array.isArray(persistedConfig.textModels) ? normalizeModelList(config.textModels, channels) : filterModelsByCapability(models, "text"),
@@ -259,6 +264,18 @@ function normalizeModelList(models: string[], channels: ModelChannel[]) {
     return Array.from(new Set((models || []).map((model) => model.trim()).filter(Boolean)))
         .map((model) => normalizeModelOptionValue(model, channels))
         .filter((model) => !allModelOptions.length || allModelOptions.includes(model) || !isChannelModelValue(model));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function normalizeModelPointCosts(costs: Record<string, unknown>) {
+    return Object.fromEntries(
+        Object.entries(costs)
+            .map(([model, value]) => [model.trim(), Math.max(0, Number(value) || 0)] as const)
+            .filter(([model]) => Boolean(model)),
+    );
 }
 
 export function useEffectiveConfig() {

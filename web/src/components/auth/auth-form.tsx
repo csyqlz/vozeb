@@ -19,9 +19,10 @@ type AuthFormProps = {
     variant?: "page" | "embedded";
     className?: string;
     headerSlot?: ReactNode;
+    authError?: string;
 };
 
-export function AuthForm({ mode, nextPath = "/canvas", registrationEnabled = true, emailRegistrationEnabled = false, firstUser = false, variant = "page", className, headerSlot }: AuthFormProps) {
+export function AuthForm({ mode, nextPath = "/canvas", registrationEnabled = true, emailRegistrationEnabled = false, firstUser = false, variant = "page", className, headerSlot, authError }: AuthFormProps) {
     const router = useRouter();
     const { message } = App.useApp();
     const setUser = useUserStore((state) => state.setUser);
@@ -85,6 +86,8 @@ export function AuthForm({ mode, nextPath = "/canvas", registrationEnabled = tru
                     <h2 className={cn("mt-2 font-semibold tracking-normal text-stone-950 dark:text-white", variant === "embedded" ? "text-2xl" : "text-3xl")}>{firstUser ? "创建第一个管理员账号" : isRegister ? "注册后进入 VOZEB" : "登录进入 VOZEB"}</h2>
                     <p className="auth-form-description mt-3 text-sm leading-6 text-stone-500 dark:text-stone-400">{isRegister ? "创建账号后即可进入 VOZEB。" : "登录后继续你的画布、素材和提示词工作流。"}</p>
                 </div>
+
+                {authError ? <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900 dark:border-red-400/20 dark:bg-red-400/10 dark:text-red-100">{authError}</div> : null}
 
                 {disabled ? <div className="rounded-md border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm text-cyan-900 dark:border-cyan-300/20 dark:bg-cyan-300/8 dark:text-cyan-50">当前站点已关闭注册，请联系管理员开通账号。</div> : null}
 

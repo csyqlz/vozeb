@@ -2,14 +2,15 @@
 
 import { App, Button, Form, Input, Modal, Progress, Segmented, Select, Tabs } from "antd";
 import { CircleAlert, Cloud, Plus, RefreshCw, Trash2, Wifi } from "lucide-react";
-import { useEffect, useState } from "react";
+import { nanoid } from "nanoid";
+import { useEffect, useRef, useState } from "react";
 
 import { ModelPicker } from "@/components/model-picker";
 import { fetchChannelModels } from "@/services/api/image";
 import { syncAppDataToWebdav, type AppSyncDomainKey, type AppSyncProgressEvent } from "@/services/app-sync";
 import { testWebdavConnection, WEBDAV_MANIFEST_FILE_NAME } from "@/services/webdav-sync";
 import { audioFormatOptions, audioVoiceOptions, normalizeAudioSpeedValue } from "@/lib/audio-generation";
-import { createModelChannel, encodeChannelModel, filterModelsByCapability, modelOptionLabel, modelOptionsFromChannels, normalizeModelOptionValue, useConfigStore, type AiConfig, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
+import { encodeChannelModel, filterModelsByCapability, modelOptionLabel, modelOptionsFromChannels, normalizeModelOptionValue, useConfigStore, type AiConfig, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
 
 type ModelGroup = {
     capability: ModelCapability;
@@ -29,6 +30,7 @@ type WebdavDomainProgress = {
 
 type PublicSystemSettings = {
     allowUserApiConfig: boolean;
+    modelPointCosts: Record<string, number>;
     defaultModels: {
         imageModel: string;
         videoModel: string;
@@ -72,8 +74,10 @@ export function AppConfigModal() {
     const [webdavSyncStatus, setWebdavSyncStatus] = useState("");
     const [webdavDomainProgress, setWebdavDomainProgress] = useState(createWebdavDomainProgress);
     const [systemSettings, setSystemSettings] = useState<PublicSystemSettings | null>(null);
+    const customConfigRef = useRef<AiConfig | null>(null);
     const config = useConfigStore((state) => state.config);
     const webdav = useConfigStore((state) => state.webdav);
+    const setConfig = useConfigStore((state) => state.setConfig);
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const updateWebdavConfig = useConfigStore((state) => state.updateWebdavConfig);
     const isConfigOpen = useConfigStore((state) => state.isConfigOpen);
@@ -88,7 +92,10 @@ export function AppConfigModal() {
         if (!isConfigOpen) return;
         void fetch("/api/auth/session")
             .then((response) => response.json())
-            .then((payload: { settings?: PublicSystemSettings }) => setSystemSettings(payload.settings || null))
+            .then((payload: { settings?: PublicSystemSettings }) => {
+                setSystemSettings(payload.settings || null);
+                updateConfig("modelPointCosts", payload.settings?.modelPointCosts || {});
+            })
             .catch(() => setSystemSettings(null));
     }, [isConfigOpen]);
 
@@ -97,8 +104,13 @@ export function AppConfigModal() {
     }, [config.apiSource, systemSettings?.allowUserApiConfig, updateConfig]);
 
     const saveConfig = (nextConfig: AiConfig) => {
-        (Object.keys(nextConfig) as Array<keyof AiConfig>).forEach((key) => updateConfig(key, nextConfig[key]));
+        setConfig(nextConfig);
     };
+
+    useEffect(() => {
+        if (!isConfigOpen || config.apiSource !== "custom" || !isSystemProxyConfig(config)) return;
+        saveConfig(createBlankCustomConfig(config));
+    }, [config, isConfigOpen, setConfig]);
 
     const finishConfig = () => {
         const ready = config.channels.some((channel) => channel.baseUrl.trim() && channel.apiKey.trim() && channel.models.length);
@@ -115,20 +127,21 @@ export function AppConfigModal() {
 
     const applySystemChannels = () => {
         if (!systemChannels.length) {
-            message.warning("管理员还没有配置可用的默认接口");
+            message.warning("平台默认接口暂未配置可用模型");
             return;
         }
+        if (!isSystemProxyConfig(config)) customConfigRef.current = { ...config, apiSource: "custom" };
         const nextConfig = withChannels({ ...config, apiSource: "system" }, systemChannels);
         const defaults = systemSettings?.defaultModels;
         saveConfig({
             ...nextConfig,
             apiSource: "system",
-            imageModel: resolveSystemDefault(systemChannels, defaults?.imageModel) || nextConfig.imageModel,
-            videoModel: resolveSystemDefault(systemChannels, defaults?.videoModel) || nextConfig.videoModel,
-            textModel: resolveSystemDefault(systemChannels, defaults?.textModel) || nextConfig.textModel,
-            audioModel: resolveSystemDefault(systemChannels, defaults?.audioModel) || nextConfig.audioModel,
+            imageModel: resolveSystemModel(nextConfig, systemChannels, config.imageModel, defaults?.imageModel, "image"),
+            videoModel: resolveSystemModel(nextConfig, systemChannels, config.videoModel, defaults?.videoModel, "video"),
+            textModel: resolveSystemModel(nextConfig, systemChannels, config.textModel, defaults?.textModel, "text"),
+            audioModel: resolveSystemModel(nextConfig, systemChannels, config.audioModel, defaults?.audioModel, "audio"),
         });
-        message.success("已应用管理员默认接口");
+        message.success("已使用平台默认接口");
     };
 
     const changeApiSource = (value: AiConfig["apiSource"]) => {
@@ -136,7 +149,8 @@ export function AppConfigModal() {
             applySystemChannels();
             return;
         }
-        updateConfig("apiSource", "custom");
+        const customConfig = customConfigRef.current || (isSystemProxyConfig(config) ? createBlankCustomConfig(config) : { ...config, apiSource: "custom" });
+        saveConfig({ ...customConfig, apiSource: "custom" });
     };
 
     const updateChannel = (id: string, patch: Partial<ModelChannel>) => {
@@ -144,7 +158,7 @@ export function AppConfigModal() {
     };
 
     const addChannel = () => {
-        updateChannels([...config.channels, createModelChannel({ name: `渠道 ${config.channels.length + 1}` })]);
+        updateChannels([...config.channels, createBlankModelChannel(`渠道 ${config.channels.length + 1}`)]);
     };
 
     const deleteChannel = (id: string) => {
@@ -267,6 +281,25 @@ export function AppConfigModal() {
                 </Button>
             }
         >
+            {shouldPromptContinue ? (
+                <div className="mb-4 flex flex-col gap-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5 text-sm text-amber-950 dark:border-amber-700/60 dark:bg-amber-950/30 dark:text-amber-100 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex min-w-0 items-start gap-2">
+                        <CircleAlert className="mt-0.5 size-4 shrink-0" />
+                        <div className="leading-6">
+                            <span className="font-semibold">需要先配置可用模型。</span>
+                            <span className="ml-1">先选择接口来源；自定义接口需要填写渠道并拉取模型，然后到「模型」Tab 选择可选项。</span>
+                        </div>
+                    </div>
+                    <div className="flex shrink-0 gap-2">
+                        <Button size="small" onClick={() => setActiveTab("channels")}>
+                            配置渠道
+                        </Button>
+                        <Button size="small" type="primary" onClick={() => setActiveTab("models")}>
+                            去模型设置
+                        </Button>
+                    </div>
+                </div>
+            ) : null}
             <Tabs
                 activeKey={activeTab}
                 onChange={setActiveTab}
@@ -282,17 +315,15 @@ export function AppConfigModal() {
                                         value={config.apiSource}
                                         onChange={(value) => changeApiSource(value as AiConfig["apiSource"])}
                                         options={[
-                                            { label: "管理员默认接口", value: "system" },
+                                            { label: "平台默认接口", value: "system" },
                                             { label: "自行配置接口", value: "custom", disabled: systemSettings?.allowUserApiConfig === false },
                                         ]}
                                     />
                                     {config.apiSource === "system" ? (
                                         <div className="mt-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                                            <div className="text-xs leading-5 text-stone-500">
-                                                默认接口通过服务端代理调用，API Key 不会下发到浏览器。当前可用渠道 {systemChannels.length} 个。
-                                            </div>
+                                            <div className="text-xs leading-5 text-stone-500">平台默认接口通过服务端代理调用，当前可用渠道 {systemChannels.length} 个。</div>
                                             <Button type="primary" onClick={applySystemChannels}>
-                                                应用默认接口
+                                                使用平台默认接口
                                             </Button>
                                         </div>
                                     ) : null}
@@ -338,13 +369,13 @@ export function AppConfigModal() {
                                                     </div>
                                                     <div className="grid gap-4 md:grid-cols-2">
                                                         <Form.Item label="渠道名称" className="mb-0">
-                                                            <Input value={channel.name} onChange={(event) => updateChannel(channel.id, { name: event.target.value })} />
+                                                            <Input value={channel.name} placeholder="例如：OpenAI、Grok、SiliconFlow" onChange={(event) => updateChannel(channel.id, { name: event.target.value })} />
                                                         </Form.Item>
                                                         <Form.Item label="Base URL" className="mb-0">
-                                                            <Input value={channel.baseUrl} onChange={(event) => updateChannel(channel.id, { baseUrl: event.target.value })} />
+                                                            <Input value={channel.baseUrl} placeholder="例如：https://api.openai.com/v1" onChange={(event) => updateChannel(channel.id, { baseUrl: event.target.value })} />
                                                         </Form.Item>
                                                         <Form.Item label="API Key" className="mb-0">
-                                                            <Input.Password value={channel.apiKey} onChange={(event) => updateChannel(channel.id, { apiKey: event.target.value })} />
+                                                            <Input.Password value={channel.apiKey} placeholder="例如：sk-..." onChange={(event) => updateChannel(channel.id, { apiKey: event.target.value })} />
                                                         </Form.Item>
                                                         <Form.Item label="模型列表" className="mb-0 md:col-span-2">
                                                             <Select mode="tags" showSearch allowClear maxTagCount="responsive" placeholder="输入模型名，或点击拉取模型" value={channel.models} onChange={(models) => updateChannel(channel.id, { models })} />
@@ -497,6 +528,31 @@ export function AppConfigModal() {
     );
 }
 
+function isSystemProxyConfig(config: AiConfig) {
+    return config.channels.length > 0 && config.channels.every((channel) => channel.baseUrl.trim().startsWith("/api/ai/system/") && channel.apiKey === "system");
+}
+
+function createBlankCustomConfig(config: AiConfig) {
+    return {
+        ...withChannels({ ...config, apiSource: "custom" }, [createBlankModelChannel("自定义渠道", "custom-default")]),
+        baseUrl: "",
+        apiKey: "",
+        models: [],
+        imageModels: [],
+        videoModels: [],
+        textModels: [],
+        audioModels: [],
+        imageModel: "",
+        videoModel: "",
+        textModel: "",
+        audioModel: "",
+    };
+}
+
+function createBlankModelChannel(name: string, id?: string): ModelChannel {
+    return { id: id || nanoid(), name, baseUrl: "", apiKey: "", apiFormat: "openai", models: [] };
+}
+
 function withChannels(config: AiConfig, channels: ModelChannel[]): AiConfig {
     const normalizedChannels = channels.map((channel) => ({ ...channel, apiFormat: "openai" as const }));
     const models = modelOptionsFromChannels(normalizedChannels);
@@ -540,9 +596,24 @@ function resolveSystemDefault(channels: ModelChannel[], model?: string) {
     return channel ? encodeChannelModel(channel.id, name) : "";
 }
 
+function resolveSystemModel(config: AiConfig, channels: ModelChannel[], currentModel: string, defaultModel: string | undefined, capability: ModelCapability) {
+    const currentName = normalizeModelOptionValue(currentModel, channels);
+    if (currentName && config[`${capability}Models` as "imageModels" | "videoModels" | "textModels" | "audioModels"].includes(currentName)) return currentName;
+    const matchedByName = resolveSystemDefault(channels, modelName(currentModel));
+    if (matchedByName && config[`${capability}Models` as "imageModels" | "videoModels" | "textModels" | "audioModels"].includes(matchedByName)) return matchedByName;
+    const adminDefault = resolveSystemDefault(channels, defaultModel);
+    if (adminDefault && config[`${capability}Models` as "imageModels" | "videoModels" | "textModels" | "audioModels"].includes(adminDefault)) return adminDefault;
+    return config[`${capability}Models` as "imageModels" | "videoModels" | "textModels" | "audioModels"][0] || "";
+}
+
+function modelName(value: string) {
+    const index = value.indexOf("::");
+    return index >= 0 ? value.slice(index + 2) : value;
+}
+
 function SystemChannelSummary({ channels }: { channels: PublicSystemSettings["systemChannels"] }) {
     if (!channels.length) {
-        return <div className="rounded-lg border border-dashed border-stone-200 p-6 text-center text-sm text-stone-500 dark:border-stone-800">管理员还没有配置可用的默认接口。</div>;
+        return <div className="rounded-lg border border-dashed border-stone-200 p-6 text-center text-sm text-stone-500 dark:border-stone-800">平台默认接口暂未配置可用模型。</div>;
     }
 
     return (
@@ -552,7 +623,7 @@ function SystemChannelSummary({ channels }: { channels: PublicSystemSettings["sy
                     <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
                         <div className="min-w-0">
                             <div className="truncate text-sm font-semibold">{channel.name || "默认渠道"}</div>
-                            <div className="mt-1 text-xs text-stone-500">连接信息由管理员保存，用户端只显示可用模型。</div>
+                            <div className="mt-1 text-xs text-stone-500">连接信息不会显示给用户端，这里只展示可用模型。</div>
                         </div>
                         <div className="shrink-0 text-xs text-stone-500">{channel.models.length} 个模型</div>
                     </div>
@@ -570,7 +641,7 @@ function SystemChannelSummary({ channels }: { channels: PublicSystemSettings["sy
 }
 
 function normalizeImageCount(value: string) {
-    return String(Math.max(1, Math.min(15, Math.floor(Math.abs(Number(value)) || 3))));
+    return String(Math.max(1, Math.min(15, Math.floor(Math.abs(Number(value)) || 1))));
 }
 
 function uniqueModels(models: string[]) {

@@ -5,6 +5,7 @@ import { nanoid } from "nanoid";
 import { dataUrlToFile } from "@/lib/image-utils";
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
 import { imageToDataUrl } from "@/services/image-storage";
+import { refreshUserPointsIfSystem } from "@/services/api/points";
 import type { ReferenceImage } from "@/types/image";
 
 export type AiTextMessage = {
@@ -598,7 +599,9 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     if (requestConfig.apiFormat === "gemini") {
         try {
-            return await requestGeminiImages(requestConfig, prompt, [], n, options);
+            const images = await requestGeminiImages(requestConfig, prompt, [], n, options);
+            await refreshUserPointsIfSystem(requestConfig.apiSource);
+            return images;
         } catch (error) {
             throw new Error(readAxiosError(error, "请求失败"));
         }
@@ -623,6 +626,7 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
             },
         );
         const images = parseImagePayload(response.data);
+        await refreshUserPointsIfSystem(requestConfig.apiSource);
         return images;
     } catch (error) {
         throw new Error(readAxiosError(error, "请求失败"));
@@ -636,7 +640,9 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     if (requestConfig.apiFormat === "gemini") {
         if (mask) throw new Error("Gemini 暂不支持蒙版编辑");
         try {
-            return await requestGeminiImages(requestConfig, requestPrompt, references, n, options);
+            const images = await requestGeminiImages(requestConfig, requestPrompt, references, n, options);
+            await refreshUserPointsIfSystem(requestConfig.apiSource);
+            return images;
         } catch (error) {
             throw new Error(readAxiosError(error, "请求失败"));
         }
@@ -662,6 +668,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     try {
         const response = await axios.post<ImageApiResponse>(aiApiUrl(requestConfig, "/images/edits"), formData, { headers: aiHeaders(requestConfig), signal: options?.signal });
         const images = parseImagePayload(response.data);
+        await refreshUserPointsIfSystem(requestConfig.apiSource);
         return images;
     } catch (error) {
         throw new Error(readAxiosError(error, "请求失败"));
@@ -674,6 +681,7 @@ export async function requestImageQuestion(config: AiConfig, messages: AiTextMes
         if (requestConfig.apiFormat === "gemini") {
             const answer = (await requestGeminiStreamingResponse(requestConfig, toGeminiBody(requestConfig, messages), onDelta, options)).content || "没有返回内容";
             if (answer === "没有返回内容") onDelta(answer);
+            await refreshUserPointsIfSystem(requestConfig.apiSource);
             return answer;
         }
         const answer =
@@ -689,6 +697,7 @@ export async function requestImageQuestion(config: AiConfig, messages: AiTextMes
                 )
             ).content || "没有返回内容";
         if (answer === "没有返回内容") onDelta(answer);
+        await refreshUserPointsIfSystem(requestConfig.apiSource);
         return answer;
     } catch (error) {
         throw new Error(readAxiosError(error, "请求失败"));
@@ -699,9 +708,11 @@ export async function requestToolResponse(config: AiConfig, messages: ResponseIn
     const requestConfig = resolveModelRequestConfig(config, config.model || config.textModel);
     try {
         if (requestConfig.apiFormat === "gemini") {
-            return await requestGeminiStreamingResponse(requestConfig, toGeminiBody(requestConfig, messages, toGeminiToolOptions(tools, toolChoice)), onDelta, options);
+            const result = await requestGeminiStreamingResponse(requestConfig, toGeminiBody(requestConfig, messages, toGeminiToolOptions(tools, toolChoice)), onDelta, options);
+            await refreshUserPointsIfSystem(requestConfig.apiSource);
+            return result;
         }
-        return await requestStreamingResponse(
+        const result = await requestStreamingResponse(
             requestConfig,
             {
                 model: requestConfig.model,
@@ -713,6 +724,8 @@ export async function requestToolResponse(config: AiConfig, messages: ResponseIn
             onDelta,
             options,
         );
+        await refreshUserPointsIfSystem(requestConfig.apiSource);
+        return result;
     } catch (error) {
         throw new Error(readAxiosError(error, "请求失败"));
     }

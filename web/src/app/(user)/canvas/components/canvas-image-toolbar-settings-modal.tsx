@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { Button, Card, Checkbox, Form, Modal, Space, Switch, Tag, Tooltip, Typography, theme as antdTheme } from "antd";
-import { Ellipsis, Image as ImageIcon, Settings2 } from "lucide-react";
+import { Button, Card, Form, Modal, Space, Switch, Tag, Tooltip, Typography, theme as antdTheme } from "antd";
+import { Check, Ellipsis, Image as ImageIcon, Settings2 } from "lucide-react";
 
 import type { ImageQuickToolId } from "./canvas-image-toolbar-tools";
 
@@ -81,14 +81,6 @@ export function ImageToolSettingsModal({
         [syncPreviewScroll],
     );
 
-    const updateSelectedTools = (values: ImageQuickToolId[]) => {
-        const next = new Set(values);
-        tools.forEach((tool) => {
-            const visible = next.has(tool.id);
-            if (selected.has(tool.id) !== visible) onToggle(tool.id, visible);
-        });
-    };
-
     useEffect(() => {
         if (!open) return;
         const toolbar = previewToolbarRef.current;
@@ -122,6 +114,7 @@ export function ImageToolSettingsModal({
 
     return (
         <Modal
+            className="canvas-image-toolbar-settings-modal"
             title="自定义工具栏"
             open={open}
             centered
@@ -168,7 +161,10 @@ export function ImageToolSettingsModal({
                             <PreviewToolbarItem key={tool.id} tool={tool} showLabels={showLabels} />
                         ))}
                     </div>
-                    <div className="flex h-48 w-full max-w-[360px] flex-col items-center justify-center rounded-xl border" style={{ background: token.colorFillAlter, borderColor: token.colorBorderSecondary, color: token.colorTextSecondary }}>
+                    <div
+                        className="relative flex h-48 w-full max-w-[360px] flex-col items-center justify-center rounded-xl border shadow-sm"
+                        style={{ background: token.colorBgContainer, borderColor: token.colorBorderSecondary, color: token.colorTextSecondary }}
+                    >
                         <ImageIcon className="mb-2 size-8" />
                         <Typography.Text type="secondary">图片节点</Typography.Text>
                     </div>
@@ -199,16 +195,26 @@ export function ImageToolSettingsModal({
                         </Space>
                     }
                 >
-                    <Checkbox.Group value={selectedIds} className="grid w-full gap-3 md:grid-cols-3" onChange={(values) => updateSelectedTools(values as ImageQuickToolId[])}>
+                    <div className="grid w-full gap-3 md:grid-cols-3">
                         {tools.map((tool) => (
-                            <Checkbox key={tool.id} value={tool.id} className="m-0">
-                                <span className="inline-flex items-center gap-2">
-                                    {tool.icon}
-                                    {tool.label}
+                            <button
+                                key={tool.id}
+                                type="button"
+                                role="checkbox"
+                                aria-checked={selected.has(tool.id)}
+                                className={`canvas-toolbar-tool-check inline-flex min-h-9 items-center gap-2 rounded-md px-1 text-left text-sm font-medium transition ${selected.has(tool.id) ? "is-selected" : ""}`}
+                                onClick={() => onToggle(tool.id, !selected.has(tool.id))}
+                            >
+                                <span className="canvas-toolbar-tool-check-box">
+                                    <Check className="size-3.5" />
                                 </span>
-                            </Checkbox>
+                                <span className="inline-flex min-w-0 items-center gap-2">
+                                    {tool.icon}
+                                    <span className="truncate">{tool.label}</span>
+                                </span>
+                            </button>
                         ))}
-                    </Checkbox.Group>
+                    </div>
                 </Form.Item>
             </Form>
         </Modal>

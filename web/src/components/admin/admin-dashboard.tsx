@@ -5,8 +5,10 @@ import { useEffect, useMemo, useState } from "react";
 import { App, Button, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Table, Tag } from "antd";
 import type { TableColumnsType } from "antd";
 import { Database, Download, Gift, Globe2, Image as ImageIcon, KeyRound, Mail, PlugZap, Plus, RefreshCw, Save, Search, Send, ShieldCheck, SlidersHorizontal, Trash2, UserCog, UserRound, UsersRound } from "lucide-react";
+import { nanoid } from "nanoid";
 
-import type { AuthSettings, PublicUser, SiteSocialKey, SystemModelChannel, UserQuota, UserRole, UserStatus } from "@/lib/auth/store";
+import { DEFAULT_MODEL_POINT_COST_KEY } from "@/constant/credits";
+import type { AuthSettings, PublicUser, SiteFriendLink, SiteSocialKey, SystemModelChannel, UserRole, UserStatus } from "@/lib/auth/store";
 import type { Prompt } from "@/services/api/prompts";
 
 type AdminDashboardProps = {
@@ -31,7 +33,7 @@ type UserEditorValue = {
     password?: string;
     role: UserRole;
     status: UserStatus;
-    quota: UserQuota;
+    pointsBalance: number;
 };
 
 type AdminSectionKey = "overview" | "site" | "settings" | "users" | "prompts";
@@ -69,6 +71,7 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
     const [bulkDeletingUsers, setBulkDeletingUsers] = useState(false);
     const [editingUser, setEditingUser] = useState<PublicUser | null>(null);
     const [activeSection, setActiveSection] = useState<AdminSectionKey>("overview");
+    const [customPointModel, setCustomPointModel] = useState("");
     const stats = useMemo(
         () => ({
             total: users.length,
@@ -148,7 +151,7 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
         }
     };
 
-    const updateUser = async (userId: string, patch: Partial<Pick<PublicUser, "displayName" | "email" | "role" | "status" | "quota">> & { password?: string }) => {
+    const updateUser = async (userId: string, patch: Partial<Pick<PublicUser, "displayName" | "email" | "role" | "status" | "pointsBalance">> & { password?: string }) => {
         setUpdatingUserId(userId);
         try {
             const response = await fetch(`/api/admin/users/${userId}`, {
@@ -311,12 +314,34 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
         setSettings((current) => ({ ...current, systemChannels: current.systemChannels.filter((channel) => channel.id !== id) }));
     };
 
-    const updateDefaultQuota = (key: keyof UserQuota, value: number | null) => {
-        setSettings((current) => ({ ...current, defaultQuota: { ...current.defaultQuota, [key]: Number(value) || 0 } }));
+    const updateDefaultPoints = (value: number | null) => {
+        setSettings((current) => ({ ...current, defaultPoints: toNumberOrZero(value) }));
     };
 
-    const updateCheckInReward = (key: keyof UserQuota, value: number | null) => {
-        setSettings((current) => ({ ...current, checkInReward: { ...current.checkInReward, [key]: Number(value) || 0 } }));
+    const updateCheckInRewardPoints = (value: number | null) => {
+        setSettings((current) => ({ ...current, checkInRewardPoints: toNumberOrZero(value) }));
+    };
+
+    const updateModelPointCost = (model: string, value: number | null) => {
+        setSettings((current) => ({ ...current, modelPointCosts: { ...current.modelPointCosts, [model]: toNumberOrOne(value) } }));
+    };
+
+    const addCustomPointModel = () => {
+        const model = customPointModel.trim();
+        if (!model) {
+            message.warning("请输入模型名称");
+            return;
+        }
+        updateModelPointCost(model, settings.modelPointCosts[model] ?? 1);
+        setCustomPointModel("");
+    };
+
+    const deleteModelPointCost = (model: string) => {
+        setSettings((current) => {
+            const next = { ...current.modelPointCosts };
+            delete next[model];
+            return { ...current, modelPointCosts: next };
+        });
     };
 
     const updateMailSetting = (key: keyof AuthSettings["mail"], value: string | number | boolean) => {
@@ -354,6 +379,36 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                     ...current.site.socials,
                     [key]: { ...current.site.socials[key], ...patch },
                 },
+            },
+        }));
+    };
+
+    const addFriendLink = () => {
+        setSettings((current) => ({
+            ...current,
+            site: {
+                ...current.site,
+                friendLinks: [...(current.site.friendLinks || []), { id: nanoid(), label: "友情链接", url: "https://", enabled: true }],
+            },
+        }));
+    };
+
+    const updateFriendLink = (id: string, patch: Partial<SiteFriendLink>) => {
+        setSettings((current) => ({
+            ...current,
+            site: {
+                ...current.site,
+                friendLinks: (current.site.friendLinks || []).map((link) => (link.id === id ? { ...link, ...patch } : link)),
+            },
+        }));
+    };
+
+    const deleteFriendLink = (id: string) => {
+        setSettings((current) => ({
+            ...current,
+            site: {
+                ...current.site,
+                friendLinks: (current.site.friendLinks || []).filter((link) => link.id !== id),
             },
         }));
     };
@@ -399,7 +454,7 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
 
     const openUserEditor = (user: PublicUser) => {
         setEditingUser(user);
-        userForm.setFieldsValue({ displayName: user.displayName, email: user.email || "", password: "", role: user.role, status: user.status, quota: user.quota });
+        userForm.setFieldsValue({ displayName: user.displayName, email: user.email || "", password: "", role: user.role, status: user.status, pointsBalance: user.pointsBalance });
     };
 
     const closeUserEditor = () => {
@@ -415,7 +470,7 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
             password: value.password || undefined,
             role: value.role,
             status: value.status,
-            quota: normalizeQuotaFormValue(value.quota, editingUser.quota),
+            pointsBalance: toNumberOrZero(value.pointsBalance),
         });
         if (user) closeUserEditor();
     };
@@ -448,10 +503,10 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
             render: (status: UserStatus) => <Tag color={status === "active" ? "green" : "red"}>{status === "active" ? "可用" : "已禁用"}</Tag>,
         },
         {
-            title: "每日额度",
-            dataIndex: "quota",
-            width: 360,
-            render: (quota: UserQuota) => <QuotaSummary quota={quota} />,
+            title: "积分余额",
+            dataIndex: "pointsBalance",
+            width: 140,
+            render: (pointsBalance: number) => <Tag className="m-0">{Number(pointsBalance || 0).toLocaleString()} 积分</Tag>,
         },
         {
             title: "操作",
@@ -508,7 +563,7 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
     const activeSectionInfo = adminSections.find((section) => section.key === activeSection) || adminSections[0];
 
     return (
-        <div className="grid gap-5 xl:grid-cols-[220px_minmax(0,1fr)]">
+        <div className="admin-mobile-safe grid min-w-0 gap-5 xl:grid-cols-[220px_minmax(0,1fr)]">
             <AdminSectionNav activeKey={activeSection} onChange={setActiveSection} />
             <div className="min-w-0 space-y-5">
                 <div className="flex flex-col gap-1 rounded-lg border border-stone-200 bg-white px-4 py-3 shadow-sm shadow-stone-200/40 dark:border-stone-800 dark:bg-stone-950 dark:shadow-black/20">
@@ -627,6 +682,35 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                                                 );
                                             })}
                                         </div>
+                                        <div className="border-t border-stone-200 pt-4 dark:border-stone-800">
+                                            <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                                                <div>
+                                                    <div className="text-sm font-semibold text-stone-950 dark:text-stone-100">友情链接</div>
+                                                    <div className="mt-1 text-xs text-stone-500 dark:text-stone-400">启用后会显示在首页顶部导航和底部链接区。</div>
+                                                </div>
+                                                <Button icon={<Plus className="size-4" />} onClick={addFriendLink}>
+                                                    添加链接
+                                                </Button>
+                                            </div>
+                                            <div className="grid gap-3">
+                                                {(settings.site.friendLinks || []).map((link) => (
+                                                    <div key={link.id} className="rounded-lg border border-stone-200 bg-white p-3 dark:border-stone-800 dark:bg-stone-950/60">
+                                                        <div className="mb-3 flex items-center justify-between gap-3">
+                                                            <div className="text-sm font-semibold text-stone-950 dark:text-stone-100">{link.label || "友情链接"}</div>
+                                                            <div className="flex items-center gap-2">
+                                                                <Switch checked={link.enabled} checkedChildren="显示" unCheckedChildren="隐藏" onChange={(enabled) => updateFriendLink(link.id, { enabled })} />
+                                                                <Button size="small" danger icon={<Trash2 className="size-3.5" />} aria-label="删除友情链接" title="删除友情链接" onClick={() => deleteFriendLink(link.id)} />
+                                                            </div>
+                                                        </div>
+                                                        <div className="grid gap-3 md:grid-cols-[160px_minmax(0,1fr)]">
+                                                            <Input value={link.label} maxLength={32} placeholder="Linux.do" onChange={(event) => updateFriendLink(link.id, { label: event.target.value })} />
+                                                            <Input value={link.url} maxLength={2000} placeholder="https://linux.do/" onChange={(event) => updateFriendLink(link.id, { url: event.target.value })} />
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                                {!settings.site.friendLinks?.length ? <div className="rounded-md border border-dashed border-stone-200 px-3 py-6 text-center text-sm text-stone-500 dark:border-stone-800">暂无友情链接。</div> : null}
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -738,10 +822,20 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                                         </div>
                                     </div>
                                 </div>
-                                <QuotaRuleTable defaultQuota={settings.defaultQuota} checkInReward={settings.checkInReward} onDefaultQuotaChange={updateDefaultQuota} onCheckInRewardChange={updateCheckInReward} />
+                                <QuotaRuleTable
+                                    settings={settings}
+                                    customModel={customPointModel}
+                                    onCustomModelChange={setCustomPointModel}
+                                    onAddCustomModel={addCustomPointModel}
+                                    onDefaultPointsChange={updateDefaultPoints}
+                                    onCheckInRewardPointsChange={updateCheckInRewardPoints}
+                                    onModelPointCostChange={updateModelPointCost}
+                                    onModelPointCostDelete={deleteModelPointCost}
+                                />
                             </div>
-                            <div className="flex justify-end border-b border-stone-200 pb-5 dark:border-stone-800">
+                            <div className="flex justify-stretch border-b border-stone-200 pb-5 sm:justify-end dark:border-stone-800">
                                 <Button
+                                    className="w-full sm:w-auto"
                                     type="primary"
                                     loading={settingsLoading}
                                     icon={<Save className="size-4" />}
@@ -751,14 +845,15 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                                                 registrationEnabled: settings.registrationEnabled,
                                                 emailRegistrationEnabled: settings.emailRegistrationEnabled,
                                                 mail: settings.mail,
-                                                defaultQuota: settings.defaultQuota,
-                                                checkInReward: settings.checkInReward,
+                                                defaultPoints: settings.defaultPoints,
+                                                checkInRewardPoints: settings.checkInRewardPoints,
+                                                modelPointCosts: settings.modelPointCosts,
                                             },
-                                            "账号、邮箱与额度设置已保存",
+                                            "账号、邮箱与积分设置已保存",
                                         )
                                     }
                                 >
-                                    保存账号、邮箱与额度
+                                    保存账号、邮箱与积分
                                 </Button>
                             </div>
 
@@ -770,7 +865,7 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                                     unCheckedChildren="禁止"
                                     onChange={(allowUserApiConfig) => setSettings((current) => ({ ...current, allowUserApiConfig }))}
                                 />
-                                <Space wrap className="justify-end">
+                                <div className="flex w-full flex-wrap gap-2 xl:w-auto xl:justify-end">
                                     <Button icon={<RefreshCw className="size-4" />} loading={fetchingModelId === "all"} onClick={() => void fetchAllModels()}>
                                         拉取全部模型
                                     </Button>
@@ -785,7 +880,7 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                                     >
                                         保存接口设置
                                     </Button>
-                                </Space>
+                                </div>
                             </div>
                             <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
                                 <div className="space-y-3">
@@ -826,7 +921,7 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                     <Panel>
                         <PanelHeader
                             title="用户管理"
-                            description="调整角色、账号状态和每日额度。"
+                            description="调整角色、账号状态和积分余额。"
                             actions={
                                 <Button href="/register" icon={<Plus className="size-4" />}>
                                     新增用户
@@ -834,8 +929,15 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                             }
                         />
                         <div className="flex flex-col gap-3 border-b border-stone-200 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5 dark:border-stone-800">
-                            <Input allowClear className="max-w-xl" prefix={<Search className="size-4 text-stone-400" />} placeholder="搜索昵称、用户名、邮箱、角色或状态" value={userSearch} onChange={(event) => setUserSearch(event.target.value)} />
-                            <div className="flex flex-wrap items-center gap-2">
+                            <Input
+                                allowClear
+                                className="w-full sm:max-w-xl"
+                                prefix={<Search className="size-4 text-stone-400" />}
+                                placeholder="搜索昵称、用户名、邮箱、角色或状态"
+                                value={userSearch}
+                                onChange={(event) => setUserSearch(event.target.value)}
+                            />
+                            <div className="flex w-full flex-wrap items-center justify-between gap-2 sm:w-auto sm:justify-end">
                                 <span className="text-sm text-stone-500 dark:text-stone-400">
                                     已选 {selectedUserIds.length} / 显示 {filteredUsers.length}
                                 </span>
@@ -908,25 +1010,25 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                                 </Form>
                             </section>
                             <section className="admin-prompt-table rounded-xl">
-                                <div className="admin-prompt-table-header flex flex-wrap items-center justify-between gap-3 px-5 py-4 sm:px-6">
-                                    <div>
+                                <div className="admin-prompt-table-header flex flex-wrap items-center justify-between gap-3 px-4 py-4 sm:px-6">
+                                    <div className="min-w-0">
                                         <h3 className="text-base font-semibold text-stone-950 dark:text-stone-100">提示词列表</h3>
                                         <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">已收录的公共提示词会同步展示到用户端提示词库。</p>
                                     </div>
-                                    <span className="rounded-md bg-stone-100 px-2.5 py-1 text-xs font-medium text-stone-600 dark:bg-white/10 dark:text-stone-300">
+                                    <span className="shrink-0 rounded-md bg-stone-100 px-2.5 py-1 text-xs font-medium text-stone-600 dark:bg-white/10 dark:text-stone-300">
                                         {filteredPrompts.length === promptCount ? `${promptCount} 条` : `${filteredPrompts.length} / ${promptCount} 条`}
                                     </span>
                                 </div>
-                                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-stone-200/70 px-5 py-4 dark:border-white/10 sm:px-6">
+                                <div className="flex flex-col gap-3 border-t border-stone-200/70 px-4 py-4 dark:border-white/10 sm:flex-row sm:items-center sm:justify-between sm:px-6">
                                     <Input
-                                        className="max-w-md"
+                                        className="w-full sm:max-w-md"
                                         prefix={<Search className="size-4 text-stone-400" />}
                                         allowClear
                                         placeholder="搜索标题、分类、标签或提示词内容"
                                         value={promptSearch}
                                         onChange={(event) => setPromptSearch(event.target.value)}
                                     />
-                                    <div className="flex items-center gap-2">
+                                    <div className="flex w-full items-center justify-between gap-2 sm:w-auto sm:justify-end">
                                         <span className="text-xs text-stone-500 dark:text-stone-400">已选 {selectedPrompts.length} 条</span>
                                         <Popconfirm title="批量删除选中提示词？" description="会从公共提示词库中移除，用户端将不再显示这些提示词。" okText="删除" cancelText="取消" onConfirm={() => void bulkDeletePrompts()}>
                                             <Button danger disabled={!selectedPrompts.length} loading={bulkDeletingPrompts} icon={<Trash2 className="size-4" />}>
@@ -994,14 +1096,10 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                             />
                         </Form.Item>
                     </div>
-                    <div className="mb-3 text-sm font-semibold text-stone-950 dark:text-stone-100">每日额度</div>
-                    <div className="grid gap-3 md:grid-cols-2">
-                        {quotaKeys.map((item) => (
-                            <Form.Item key={item.key} label={item.label} name={["quota", item.key]} rules={[{ required: true, message: "请输入额度" }]}>
-                                <InputNumber className="w-full" min={0} precision={0} />
-                            </Form.Item>
-                        ))}
-                    </div>
+                    <div className="mb-3 text-sm font-semibold text-stone-950 dark:text-stone-100">积分余额</div>
+                    <Form.Item label="当前积分" name="pointsBalance" rules={[{ required: true, message: "请输入积分余额" }]}>
+                        <InputNumber className="w-full" min={0} precision={0} />
+                    </Form.Item>
                 </Form>
             </Modal>
         </div>
@@ -1009,13 +1107,13 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
 }
 
 function Panel({ children }: { children: ReactNode }) {
-    return <section className="overflow-hidden rounded-lg border border-stone-200 bg-white shadow-sm shadow-stone-200/40 dark:border-stone-800 dark:bg-stone-950 dark:shadow-black/20">{children}</section>;
+    return <section className="min-w-0 overflow-hidden rounded-lg border border-stone-200 bg-white shadow-sm shadow-stone-200/40 dark:border-stone-800 dark:bg-stone-950 dark:shadow-black/20">{children}</section>;
 }
 
 function AdminSectionNav({ activeKey, onChange }: { activeKey: AdminSectionKey; onChange: (key: AdminSectionKey) => void }) {
     return (
-        <aside className="xl:sticky xl:top-20 xl:self-start">
-            <div className="overflow-x-auto rounded-lg border border-stone-200 bg-white p-2 shadow-sm shadow-stone-200/40 dark:border-stone-800 dark:bg-stone-950 dark:shadow-black/20">
+        <aside className="min-w-0 xl:sticky xl:top-20 xl:self-start">
+            <div className="max-w-full overflow-x-auto rounded-lg border border-stone-200 bg-white p-2 shadow-sm shadow-stone-200/40 dark:border-stone-800 dark:bg-stone-950 dark:shadow-black/20">
                 <div className="flex gap-2 xl:flex-col">
                     {adminSections.map((section) => {
                         const active = section.key === activeKey;
@@ -1051,7 +1149,7 @@ function PanelHeader({ title, description, actions }: { title: string; descripti
                 <h2 className="text-base font-semibold text-stone-950 dark:text-stone-100">{title}</h2>
                 <p className="mt-1 text-sm leading-6 text-stone-500 dark:text-stone-400">{description}</p>
             </div>
-            {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
+            {actions ? <div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto sm:justify-end lg:max-w-[58%]">{actions}</div> : null}
         </div>
     );
 }
@@ -1087,35 +1185,69 @@ function SettingInlineToggle({ title, checked, checkedChildren, unCheckedChildre
 }
 
 function QuotaRuleTable({
-    defaultQuota,
-    checkInReward,
-    onDefaultQuotaChange,
-    onCheckInRewardChange,
+    settings,
+    customModel,
+    onCustomModelChange,
+    onAddCustomModel,
+    onDefaultPointsChange,
+    onCheckInRewardPointsChange,
+    onModelPointCostChange,
+    onModelPointCostDelete,
 }: {
-    defaultQuota: UserQuota;
-    checkInReward: UserQuota;
-    onDefaultQuotaChange: (key: keyof UserQuota, value: number | null) => void;
-    onCheckInRewardChange: (key: keyof UserQuota, value: number | null) => void;
+    settings: AuthSettings;
+    customModel: string;
+    onCustomModelChange: (value: string) => void;
+    onAddCustomModel: () => void;
+    onDefaultPointsChange: (value: number | null) => void;
+    onCheckInRewardPointsChange: (value: number | null) => void;
+    onModelPointCostChange: (model: string, value: number | null) => void;
+    onModelPointCostDelete: (model: string) => void;
 }) {
+    const channelModels = uniqueList(settings.systemChannels.flatMap((channel) => channel.models));
+    const models = uniqueList([...channelModels, ...Object.keys(settings.modelPointCosts || {}).filter((model) => model !== DEFAULT_MODEL_POINT_COST_KEY)]);
+    const channelModelSet = new Set(channelModels);
     return (
         <div className="rounded-lg border border-stone-200 bg-stone-50/70 p-4 dark:border-stone-800 dark:bg-stone-900/40">
-            <SectionTitle icon={<Gift className="size-4" />} title="额度规则" />
-            <div className="mt-4 overflow-x-auto">
-                <div className="min-w-[540px]">
-                    <div className="grid grid-cols-[112px_minmax(0,1fr)_minmax(0,1fr)] gap-3 border-b border-stone-200 pb-2 text-xs font-medium text-stone-500 dark:border-stone-800 dark:text-stone-400">
-                        <div>类型</div>
-                        <div>新用户默认额度</div>
-                        <div>每日签到奖励</div>
-                    </div>
-                    <div className="divide-y divide-stone-200 dark:divide-stone-800">
-                        {quotaKeys.map((item) => (
-                            <div key={item.key} className="grid grid-cols-[112px_minmax(0,1fr)_minmax(0,1fr)] items-center gap-3 py-3">
-                                <div className="text-sm font-medium text-stone-700 dark:text-stone-200">{item.label}</div>
-                                <InputNumber className="w-full" min={0} precision={0} value={defaultQuota[item.key]} onChange={(value) => onDefaultQuotaChange(item.key, toNumberOrZero(value))} />
-                                <InputNumber className="w-full" min={0} precision={0} value={checkInReward[item.key]} onChange={(value) => onCheckInRewardChange(item.key, toNumberOrZero(value))} />
+            <SectionTitle icon={<Gift className="size-4" />} title="积分规则" />
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <LabeledControl label="新用户初始积分">
+                    <InputNumber className="w-full" min={0} precision={0} value={settings.defaultPoints} onChange={(value) => onDefaultPointsChange(toNumberOrZero(value))} />
+                </LabeledControl>
+                <LabeledControl label="每日签到奖励积分">
+                    <InputNumber className="w-full" min={0} precision={0} value={settings.checkInRewardPoints} onChange={(value) => onCheckInRewardPointsChange(toNumberOrZero(value))} />
+                </LabeledControl>
+            </div>
+            <div className="mt-4 rounded-md border border-stone-200 bg-white p-3 dark:border-stone-800 dark:bg-stone-950/70">
+                <div className="text-sm font-semibold text-stone-950 dark:text-stone-100">模型消耗倍数</div>
+                <div className="mt-1 text-xs leading-5 text-stone-500 dark:text-stone-400">使用管理员默认接口时扣积分；自定义接口不扣平台积分。Grok 或其他未单独设置的模型会使用默认消耗。</div>
+                <div className="mt-3 max-w-xs">
+                    <LabeledControl label="未单独设置模型默认消耗">
+                        <InputNumber className="w-full" min={0} precision={2} value={settings.modelPointCosts[DEFAULT_MODEL_POINT_COST_KEY] ?? 1} onChange={(value) => onModelPointCostChange(DEFAULT_MODEL_POINT_COST_KEY, toNumberOrOne(value))} />
+                    </LabeledControl>
+                </div>
+                <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                    <Input value={customModel} placeholder="输入任意模型名，例如 grok-imagine-video" onChange={(event) => onCustomModelChange(event.target.value)} onPressEnter={onAddCustomModel} />
+                    <Button icon={<Plus className="size-4" />} onClick={onAddCustomModel}>
+                        添加模型
+                    </Button>
+                </div>
+                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                    {models.length ? (
+                        models.map((model) => (
+                            <div key={model} className="grid min-w-0 grid-cols-[minmax(0,1fr)_120px_auto] items-center gap-3">
+                                <div className="min-w-0">
+                                    <span className="block truncate text-sm text-stone-700 dark:text-stone-200" title={model}>
+                                        {model}
+                                    </span>
+                                    {!channelModelSet.has(model) ? <span className="mt-0.5 block text-xs text-stone-400">手动添加</span> : null}
+                                </div>
+                                <InputNumber className="w-full" min={0} precision={2} value={settings.modelPointCosts[model] ?? 1} onChange={(value) => onModelPointCostChange(model, toNumberOrOne(value))} />
+                                <Button size="small" danger icon={<Trash2 className="size-3.5" />} aria-label="删除消耗配置" title="删除消耗配置" onClick={() => onModelPointCostDelete(model)} />
                             </div>
-                        ))}
-                    </div>
+                        ))
+                    ) : (
+                        <div className="rounded-md border border-dashed border-stone-200 px-3 py-6 text-center text-sm text-stone-500 md:col-span-2 dark:border-stone-800">添加模型名，或先在下方通用接口中拉取模型，再配置消耗倍数。</div>
+                    )}
                 </div>
             </div>
         </div>
@@ -1139,7 +1271,7 @@ function SystemChannelEditor({ channel, fetching, onChange, onDelete, onFetchMod
                     </div>
                     <div className="mt-1 truncate text-xs text-stone-500 dark:text-stone-400">{channel.baseUrl || "未填写 Base URL"}</div>
                 </div>
-                <Space wrap>
+                <Space wrap className="w-full justify-start sm:w-auto sm:justify-end">
                     <Button size="small" icon={<RefreshCw className="size-3.5" />} loading={fetching} onClick={onFetchModels}>
                         拉取模型
                     </Button>
@@ -1171,7 +1303,7 @@ function SystemChannelEditor({ channel, fetching, onChange, onDelete, onFetchMod
 
 function LabeledControl({ label, children }: { label: string; children: ReactNode }) {
     return (
-        <label className="block">
+        <label className="block min-w-0">
             <span className="mb-1.5 block text-xs font-medium text-stone-500 dark:text-stone-400">{label}</span>
             {children}
         </label>
@@ -1192,18 +1324,6 @@ function Metric({ label, value, detail, icon, tone }: { label: string; value: nu
     );
 }
 
-function QuotaSummary({ quota }: { quota: UserQuota }) {
-    return (
-        <div className="flex flex-wrap gap-1.5">
-            {quotaKeys.map((item) => (
-                <Tag key={item.key} className="m-0 text-[11px]">
-                    {item.shortLabel} {quota[item.key]}
-                </Tag>
-            ))}
-        </div>
-    );
-}
-
 function SiteLogoPreview({ logoUrl }: { logoUrl: string }) {
     if (logoUrl) return <img src={logoUrl} alt="" className="size-12 rounded-md bg-stone-100 object-contain p-1 dark:bg-white/10" referrerPolicy="no-referrer" />;
     return (
@@ -1218,7 +1338,7 @@ function SiteLogoPreview({ logoUrl }: { logoUrl: string }) {
 }
 
 function createSystemChannel(): SystemModelChannel {
-    return { id: crypto.randomUUID(), name: "默认渠道", baseUrl: "", apiKey: "", apiFormat: "openai", models: [], enabled: true };
+    return { id: nanoid(), name: "默认渠道", baseUrl: "", apiKey: "", apiFormat: "openai", models: [], enabled: true };
 }
 
 async function requestAdminModels(channel: SystemModelChannel) {
@@ -1243,31 +1363,15 @@ function uniqueList(values: string[]) {
     return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
 }
 
-function normalizeQuotaFormValue(value: Partial<UserQuota> | undefined, fallback: UserQuota): UserQuota {
-    return {
-        imageDaily: normalizeQuotaNumber(value?.imageDaily, fallback.imageDaily),
-        videoDaily: normalizeQuotaNumber(value?.videoDaily, fallback.videoDaily),
-        textDaily: normalizeQuotaNumber(value?.textDaily, fallback.textDaily),
-        audioDaily: normalizeQuotaNumber(value?.audioDaily, fallback.audioDaily),
-    };
-}
-
-function normalizeQuotaNumber(value: unknown, fallback: number) {
-    const numberValue = Math.floor(Number(value));
-    return Number.isFinite(numberValue) && numberValue >= 0 ? numberValue : fallback;
-}
-
 function toNumberOrZero(value: unknown) {
     const numberValue = Math.floor(Number(value));
     return Number.isFinite(numberValue) && numberValue >= 0 ? numberValue : 0;
 }
 
-const quotaKeys: Array<{ key: keyof UserQuota; label: string; shortLabel: string }> = [
-    { key: "imageDaily", label: "图片额度", shortLabel: "图" },
-    { key: "videoDaily", label: "视频额度", shortLabel: "视频" },
-    { key: "textDaily", label: "文本额度", shortLabel: "文" },
-    { key: "audioDaily", label: "音频额度", shortLabel: "音频" },
-];
+function toNumberOrOne(value: unknown) {
+    const numberValue = Number(value);
+    return Number.isFinite(numberValue) && numberValue >= 0 ? Number(numberValue.toFixed(2)) : 1;
+}
 
 const defaultModelKeys = [
     { key: "imageModel", label: "生图" },
@@ -1279,8 +1383,8 @@ const defaultModelKeys = [
 const adminSections: Array<{ key: AdminSectionKey; label: string; description: string; shortDescription: string; icon: ReactNode }> = [
     { key: "overview", label: "概览", description: "快速查看用户、接口、模型和公共提示词状态。", shortDescription: "关键数据", icon: <Database className="size-4" /> },
     { key: "site", label: "网站设置", description: "管理前台网站标题、Logo、SEO 标题、描述和关键词。", shortDescription: "品牌与 SEO", icon: <Globe2 className="size-4" /> },
-    { key: "settings", label: "系统设置", description: "管理注册策略、签到额度、通用接口和默认模型。", shortDescription: "账号与接口", icon: <SlidersHorizontal className="size-4" /> },
-    { key: "users", label: "用户管理", description: "调整用户角色、账号状态和每日额度。", shortDescription: "角色额度", icon: <UsersRound className="size-4" /> },
+    { key: "settings", label: "系统设置", description: "管理注册策略、签到积分、通用接口和默认模型。", shortDescription: "账号与接口", icon: <SlidersHorizontal className="size-4" /> },
+    { key: "users", label: "用户管理", description: "调整用户角色、账号状态和积分余额。", shortDescription: "角色积分", icon: <UsersRound className="size-4" /> },
     { key: "prompts", label: "提示词库", description: "维护会出现在用户端提示词库里的公共提示词。", shortDescription: "公共内容", icon: <KeyRound className="size-4" /> },
 ];
 

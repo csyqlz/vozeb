@@ -10,6 +10,8 @@ import { AppConfigModal } from "@/components/layout/app-config-modal";
 import { MobileNavDrawer } from "@/components/layout/mobile-nav-drawer";
 import { UserStatusActions } from "@/components/layout/user-status-actions";
 import { cn } from "@/lib/utils";
+import { useConfigStore } from "@/stores/use-config-store";
+import { type LocalUser, useUserStore } from "@/stores/use-user-store";
 
 type PublicSiteSettings = {
     title: string;
@@ -21,18 +23,22 @@ export function AppTopNav() {
     const router = useRouter();
     const [mobileNavOpen, setMobileNavOpen] = useState(false);
     const [site, setSite] = useState<PublicSiteSettings>({ title: "VOZEB", logoUrl: "/logo.svg" });
+    const setUser = useUserStore((state) => state.setUser);
+    const updateConfig = useConfigStore((state) => state.updateConfig);
     const hideHeader = /^\/canvas\/[^/]+/.test(pathname);
     const slug = pathname.split("/").filter(Boolean)[0];
     const activeToolSlug = navigationTools.some((tool) => tool.slug === slug) ? (slug as NavigationToolSlug) : undefined;
 
     useEffect(() => {
         void fetch("/api/auth/session")
-            .then((response) => response.json() as Promise<{ settings?: { site?: PublicSiteSettings } }>)
+            .then((response) => response.json() as Promise<{ user?: LocalUser | null; settings?: { site?: PublicSiteSettings; modelPointCosts?: Record<string, number> } }>)
             .then((payload) => {
                 if (payload.settings?.site) setSite(payload.settings.site);
+                if (payload.user) setUser(payload.user);
+                updateConfig("modelPointCosts", payload.settings?.modelPointCosts || {});
             })
             .catch(() => undefined);
-    }, []);
+    }, [setUser, updateConfig]);
 
     return (
         <>

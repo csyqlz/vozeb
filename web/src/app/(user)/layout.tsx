@@ -11,7 +11,7 @@ export default async function UserLayout({ children }: { children: ReactNode }) 
 
     return (
         <AuthUserHydrator
-            user={{ id: user.id, username: user.username, email: user.email, displayName: user.displayName, role: user.role, status: user.status, quota: user.quota, checkedInToday: user.checkedInToday, lastCheckInDate: user.lastCheckInDate }}
+            user={{ id: user.id, username: user.username, email: user.email, displayName: user.displayName, role: user.role, status: user.status, pointsBalance: user.pointsBalance, checkedInToday: user.checkedInToday, lastCheckInDate: user.lastCheckInDate }}
         >
             <div className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
                 <AppTopNav />

@@ -24,6 +24,7 @@ type SessionPayload = {
             footerCopyright?: string;
             termsUrl?: string;
             privacyUrl?: string;
+            friendLinks?: SiteFriendLink[];
             socials?: SiteSocialSettings;
         };
     };
@@ -32,6 +33,7 @@ type SessionPayload = {
 type SiteSocialKey = "email" | "telegram" | "x" | "instagram";
 
 type SiteSocialSettings = Record<SiteSocialKey, { enabled: boolean; label: string; url: string }>;
+type SiteFriendLink = { id: string; label: string; url: string; enabled: boolean };
 
 const featureItems = [
     { icon: Layers3, title: "无限画布", text: "把图片、文字、视频、音频与配置节点串成连续创作流。" },
@@ -52,6 +54,7 @@ const defaultSite: {
     footerCopyright: string;
     termsUrl: string;
     privacyUrl: string;
+    friendLinks: SiteFriendLink[];
     socials: SiteSocialSettings;
 } = {
     title: "VOZEB",
@@ -60,6 +63,7 @@ const defaultSite: {
     footerCopyright: "© 2026 VOZEB. All rights reserved.",
     termsUrl: "/terms",
     privacyUrl: "/privacy",
+    friendLinks: [{ id: "linux-do", label: "Linux.do", url: "https://linux.do/", enabled: true }],
     socials: {
         email: { enabled: true, label: "邮箱联系", url: "mailto:contact@example.com" },
         telegram: { enabled: true, label: "Telegram", url: "https://t.me/vozeb" },
@@ -71,8 +75,8 @@ const defaultSite: {
 const socialIconByKey: Record<SiteSocialKey, ReactNode> = {
     email: <Mail className="size-4" />,
     telegram: <Send className="size-4" />,
-    x: <span className="text-xs font-bold">X</span>,
-    instagram: <span className="text-[11px] font-bold">IG</span>,
+    x: <span className="text-base font-black leading-none">X</span>,
+    instagram: <span className="text-sm font-black leading-none">IG</span>,
 };
 
 function Highlighter({ action, color, children }: { action: "highlight" | "underline"; color: string; children: ReactNode }) {
@@ -133,6 +137,7 @@ export default function HomePage() {
     const setUser = useUserStore((state) => state.setUser);
     const theme = useThemeStore((state) => state.theme);
     const setTheme = useThemeStore((state) => state.setTheme);
+    const friendLinks = (site.friendLinks || []).filter((link) => link.enabled && link.url);
 
     useEffect(() => {
         void fetch("/api/auth/session")
@@ -172,15 +177,15 @@ export default function HomePage() {
                 </div>
             </header>
 
-            <section className="relative mx-auto flex min-h-[calc(100dvh-7rem)] max-w-[1500px] items-center justify-center px-6 pb-8 pt-10">
+            <section className="relative mx-auto flex min-h-[calc(100dvh-7rem)] max-w-[1500px] items-center justify-center px-6 pb-8 pt-4">
                 <div className="landing-hero-copy relative z-10 mx-auto w-full max-w-7xl text-center">
-                    <div className="inline-flex items-center gap-2 rounded-md border border-cyan-300/40 bg-white/70 px-3 py-1.5 text-sm text-stone-700 shadow-sm shadow-cyan-950/5 dark:border-cyan-200/20 dark:bg-cyan-200/8 dark:text-cyan-100">
-                        <Sparkles className="size-4" />
-                        v0.6.2 官网式创作入口
-                    </div>
                     <div className="hero-title-stage">
                         <div className="hero-title-wrap">
                             <h1 className="ai-title-aurora max-w-6xl text-balance text-7xl font-semibold tracking-normal sm:text-8xl lg:text-[9rem] xl:text-[11rem]">{site.title || "VOZEB"}</h1>
+                            <span className="hero-version-badge inline-flex items-center gap-2 rounded-lg border border-cyan-300/45 bg-white/82 px-3.5 py-2 text-sm font-semibold text-stone-700 shadow-sm shadow-cyan-950/5 dark:border-cyan-200/20 dark:bg-cyan-200/8 dark:text-cyan-100">
+                                <Sparkles className="size-4" />
+                                v0.7.0 创作入口
+                            </span>
                             <HeroCape />
                         </div>
                     </div>
@@ -299,6 +304,11 @@ export default function HomePage() {
                             <Link href={site.privacyUrl || "/privacy"} className="landing-footer-link">
                                 隐私政策
                             </Link>
+                            {friendLinks.map((link) => (
+                                <Link key={link.id} href={link.url} className="landing-footer-link" target={link.url.startsWith("/") ? undefined : "_blank"} rel={link.url.startsWith("/") ? undefined : "noreferrer"}>
+                                    {link.label}
+                                </Link>
+                            ))}
                         </div>
                         <div className="landing-footer-socials">
                             {Object.entries(site.socials)
@@ -342,7 +352,7 @@ export default function HomePage() {
                             <p className="mt-4 text-sm leading-7 text-stone-500 dark:text-stone-300">登录后进入画布、素材、模型和提示词库。</p>
                         </div>
                         <div className="landing-auth-modal-bullets grid gap-2 text-sm text-stone-600 dark:text-stone-300">
-                            {["无限画布编排", "远程提示词库", "用户额度与后台"].map((item) => (
+                            {["无限画布编排", "远程提示词库", "用户积分与后台"].map((item) => (
                                 <div key={item} className="flex items-center gap-2">
                                     <span className="size-1.5 rounded-full bg-cyan-300" />
                                     <span>{item}</span>

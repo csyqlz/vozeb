@@ -200,7 +200,7 @@ export function CanvasNodeHoverToolbar({
         <>
             <div
                 ref={toolbarRef}
-                className="thin-scrollbar absolute z-[70] flex h-12 max-w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-full items-center overflow-x-auto overflow-y-visible rounded-[18px] border border-black/10 bg-white text-[15px] text-[#242529] shadow-[0_8px_28px_rgba(15,23,42,.12)]"
+                className="hide-scrollbar absolute z-[70] flex h-12 max-w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-full items-center overflow-x-auto overflow-y-hidden rounded-[18px] border border-black/10 bg-white text-[15px] text-[#242529] shadow-[0_8px_28px_rgba(15,23,42,.12)]"
                 style={{ left: toolbarLeft, top }}
                 onMouseEnter={() => onKeep(node.id)}
                 onMouseLeave={() => {

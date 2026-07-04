@@ -6,11 +6,12 @@ import { Gift, Keyboard, LogOut, Settings2, ShieldCheck, UserCircle } from "luci
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { MenuProps } from "antd";
-import { App, Dropdown } from "antd";
+import { App, Dropdown, Popover, Spin, Tag } from "antd";
 
 import { AnimatedThemeToggler } from "@/components/ui/animated-theme-toggler";
 import { GitHubLink } from "@/components/layout/github-link";
 import { VersionReleaseModal } from "@/components/layout/version-release-modal";
+import { CreditSymbol } from "@/constant/credits";
 import { cn } from "@/lib/utils";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useConfigStore } from "@/stores/use-config-store";
@@ -25,19 +26,26 @@ type UserStatusActionsProps = {
 
 type CheckInPayload = {
     user?: ReturnType<typeof useUserStore.getState>["user"];
-    reward?: {
-        imageDaily: number;
-        videoDaily: number;
-        textDaily: number;
-        audioDaily: number;
-    };
+    rewardPoints?: number;
     error?: string;
+};
+
+type PointRecord = {
+    id: string;
+    type: "check-in" | "consume" | "admin-adjust";
+    amount: number;
+    balanceAfter: number;
+    description: string;
+    createdAt: string;
 };
 
 export function UserStatusActions({ showConfig = true, variant = "default", onOpenShortcuts }: UserStatusActionsProps) {
     const router = useRouter();
     const { message } = App.useApp();
     const [checkingIn, setCheckingIn] = useState(false);
+    const [pointsOpen, setPointsOpen] = useState(false);
+    const [pointsLoading, setPointsLoading] = useState(false);
+    const [pointRecords, setPointRecords] = useState<PointRecord[]>([]);
     const user = useUserStore((state) => state.user);
     const setUser = useUserStore((state) => state.setUser);
     const clearSession = useUserStore((state) => state.clearSession);
@@ -111,7 +119,7 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
             const payload = (await response.json()) as CheckInPayload;
             if (!response.ok || !payload.user) throw new Error(payload.error || "签到失败");
             setUser(payload.user);
-            message.success(`签到成功，获得 ${formatQuotaReward(payload.reward)}`);
+            message.success(`签到成功，获得 ${formatQuotaReward(payload.rewardPoints)}`);
         } catch (error) {
             message.error(error instanceof Error ? error.message : "签到失败");
         } finally {
@@ -119,8 +127,45 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
         }
     };
 
+    const loadPointRecords = async () => {
+        if (!user || pointsLoading) return;
+        setPointsLoading(true);
+        try {
+            const response = await fetch("/api/points?limit=30", { cache: "no-store" });
+            const payload = (await response.json()) as { records?: PointRecord[]; error?: string };
+            if (!response.ok) throw new Error(payload.error || "积分记录加载失败");
+            setPointRecords(payload.records || []);
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "积分记录加载失败");
+        } finally {
+            setPointsLoading(false);
+        }
+    };
+
     return (
         <div className="inline-flex shrink-0 items-center gap-1">
+            {user ? (
+                <Popover
+                    open={pointsOpen}
+                    onOpenChange={(open) => {
+                        setPointsOpen(open);
+                        if (open) void loadPointRecords();
+                    }}
+                    trigger="click"
+                    placement="bottomRight"
+                    content={<PointRecordPanel loading={pointsLoading} records={pointRecords} />}
+                >
+                    <button
+                        type="button"
+                        className="hidden h-8 shrink-0 items-center gap-1.5 rounded-md border border-stone-200 px-2.5 text-xs font-semibold text-stone-700 transition hover:border-stone-300 hover:text-stone-950 sm:inline-flex dark:border-stone-800 dark:text-stone-200 dark:hover:border-stone-700 dark:hover:text-white"
+                        style={iconStyle}
+                        title="积分余额"
+                    >
+                        <CreditSymbol className="text-sm" />
+                        {user.pointsBalance.toLocaleString()}
+                    </button>
+                </Popover>
+            ) : null}
             {user ? (
                 <button
                     type="button"
@@ -180,8 +225,42 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
     );
 }
 
-function formatQuotaReward(reward: CheckInPayload["reward"]) {
-    if (!reward) return "签到奖励";
-    const parts = [reward.imageDaily ? `图片 +${reward.imageDaily}` : "", reward.videoDaily ? `视频 +${reward.videoDaily}` : "", reward.textDaily ? `文本 +${reward.textDaily}` : "", reward.audioDaily ? `音频 +${reward.audioDaily}` : ""].filter(Boolean);
-    return parts.length ? parts.join("、") : "今日奖励";
+function formatQuotaReward(rewardPoints?: number) {
+    return `${Math.max(0, Math.floor(Number(rewardPoints) || 0)).toLocaleString()} 积分`;
+}
+
+function PointRecordPanel({ loading, records }: { loading: boolean; records: PointRecord[] }) {
+    return (
+        <div className="w-72">
+            <div className="mb-3 text-sm font-semibold text-stone-950 dark:text-stone-100">积分记录</div>
+            {loading ? (
+                <div className="flex h-24 items-center justify-center">
+                    <Spin size="small" />
+                </div>
+            ) : records.length ? (
+                <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
+                    {records.map((record) => {
+                        const positive = record.amount > 0;
+                        return (
+                            <div key={record.id} className="rounded-md border border-stone-200 px-3 py-2 dark:border-stone-800">
+                                <div className="flex items-center justify-between gap-3">
+                                    <span className="min-w-0 truncate text-sm font-medium text-stone-800 dark:text-stone-100">{record.description}</span>
+                                    <Tag color={positive ? "green" : "red"} className="m-0 shrink-0">
+                                        {positive ? "+" : ""}
+                                        {record.amount}
+                                    </Tag>
+                                </div>
+                                <div className="mt-1 flex items-center justify-between gap-3 text-xs text-stone-500">
+                                    <span>{new Date(record.createdAt).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>
+                                    <span>余额 {record.balanceAfter.toLocaleString()}</span>
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            ) : (
+                <div className="rounded-md border border-dashed border-stone-200 px-3 py-8 text-center text-sm text-stone-500 dark:border-stone-800">暂无积分记录</div>
+            )}
+        </div>
+    );
 }

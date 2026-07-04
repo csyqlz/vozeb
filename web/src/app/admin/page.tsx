@@ -26,29 +26,29 @@ export default async function AdminPage() {
                 displayName: currentUser.displayName,
                 role: currentUser.role,
                 status: currentUser.status,
-                quota: currentUser.quota,
+                pointsBalance: currentUser.pointsBalance,
                 checkedInToday: currentUser.checkedInToday,
                 lastCheckInDate: currentUser.lastCheckInDate,
             }}
         >
-            <main className="h-dvh overflow-y-auto bg-stone-100 text-stone-950 dark:bg-stone-950 dark:text-stone-100">
+            <main className="h-dvh overflow-x-hidden overflow-y-auto bg-white text-stone-950 dark:bg-stone-950 dark:text-stone-100">
                 <header className="sticky top-0 z-20 border-b border-stone-200 bg-white/95 backdrop-blur-xl dark:border-stone-800 dark:bg-stone-950/95">
-                    <div className="mx-auto flex h-16 max-w-[1440px] items-center justify-between gap-4 px-4 sm:px-6">
-                        <Link href="/" className="flex items-center gap-2.5 text-base font-semibold text-stone-950 dark:text-stone-100">
+                    <div className="mx-auto flex h-16 max-w-[1440px] min-w-0 items-center justify-between gap-3 px-4 sm:gap-4 sm:px-6">
+                        <Link href="/" className="flex min-w-0 items-center gap-2.5 text-base font-semibold text-stone-950 dark:text-stone-100">
                             <span
-                                className="size-8 bg-stone-950 dark:bg-white"
+                                className="size-8 shrink-0 bg-stone-950 dark:bg-white"
                                 style={{
                                     mask: "url(/logo.svg) center / contain no-repeat",
                                     WebkitMask: "url(/logo.svg) center / contain no-repeat",
                                 }}
                             />
-                            <span>管理后台</span>
+                            <span className="truncate">管理后台</span>
                         </Link>
                         <UserStatusActions showConfig={false} />
                     </div>
                 </header>
 
-                <div className="mx-auto max-w-[1440px] px-4 py-5 sm:px-6 lg:py-6">
+                <div className="mx-auto max-w-[1440px] px-3 py-4 sm:px-6 sm:py-5 lg:py-6">
                     <div className="mb-5 flex flex-col gap-4 rounded-lg border border-stone-200 bg-white px-4 py-4 shadow-sm shadow-stone-200/40 sm:px-5 md:flex-row md:items-center md:justify-between dark:border-stone-800 dark:bg-stone-950 dark:shadow-black/20">
                         <div className="flex min-w-0 items-start gap-3">
                             <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-stone-950 text-white dark:bg-stone-100 dark:text-stone-950">

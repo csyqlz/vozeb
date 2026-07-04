@@ -8,14 +8,14 @@ export type UserRole = "admin" | "user";
 export type UserStatus = "active" | "disabled";
 export type ApiCallFormat = "openai" | "gemini";
 
-export type UserQuota = {
+type LegacyUserQuota = {
     imageDaily: number;
     videoDaily: number;
     textDaily: number;
     audioDaily: number;
 };
 
-export type QuotaKind = "image" | "video" | "text" | "audio";
+export type ModelPointCosts = Record<string, number>;
 
 export type SystemModelChannel = {
     id: string;
@@ -43,7 +43,15 @@ export type SiteSettings = {
     footerCopyright: string;
     termsUrl: string;
     privacyUrl: string;
+    friendLinks: SiteFriendLink[];
     socials: SiteSocialSettings;
+};
+
+export type SiteFriendLink = {
+    id: string;
+    label: string;
+    url: string;
+    enabled: boolean;
 };
 
 export type SiteSocialKey = "email" | "telegram" | "x" | "instagram";
@@ -64,6 +72,8 @@ const DEFAULT_SITE_SOCIALS: SiteSocialSettings = {
     instagram: { enabled: true, label: "Instagram", url: "https://instagram.com/vozeb" },
 };
 
+const DEFAULT_SITE_FRIEND_LINKS: SiteFriendLink[] = [{ id: "linux-do", label: "Linux.do", url: "https://linux.do/", enabled: true }];
+
 export type MailSettings = {
     provider: string;
     host: string;
@@ -82,7 +92,7 @@ export type PublicUser = {
     displayName: string;
     role: UserRole;
     status: UserStatus;
-    quota: UserQuota;
+    pointsBalance: number;
     checkedInToday: boolean;
     lastCheckInDate?: string;
     createdAt: string;
@@ -102,20 +112,23 @@ type StoredSession = {
     expiresAt: string;
 };
 
-type StoredQuotaUsage = {
+export type PublicPointRecord = {
+    id: string;
     userId: string;
-    date: string;
-    imageDaily: number;
-    videoDaily: number;
-    textDaily: number;
-    audioDaily: number;
-    updatedAt: string;
+    type: "check-in" | "consume" | "admin-adjust";
+    amount: number;
+    balanceAfter: number;
+    description: string;
+    model?: string;
+    createdAt: string;
 };
+
+type StoredPointRecord = PublicPointRecord;
 
 type StoredCheckIn = {
     userId: string;
     date: string;
-    reward: UserQuota;
+    rewardPoints: number;
     createdAt: string;
 };
 
@@ -138,8 +151,9 @@ export type AuthSettings = {
     emailRegistrationEnabled: boolean;
     mail: MailSettings;
     allowUserApiConfig: boolean;
-    defaultQuota: UserQuota;
-    checkInReward: UserQuota;
+    defaultPoints: number;
+    checkInRewardPoints: number;
+    modelPointCosts: ModelPointCosts;
     systemChannels: SystemModelChannel[];
     defaultModels: SystemDefaultModels;
 };
@@ -148,7 +162,8 @@ type AuthDatabase = {
     version: 1;
     users: StoredUser[];
     sessions: StoredSession[];
-    quotaUsage: StoredQuotaUsage[];
+    quotaUsage: unknown[];
+    pointRecords: StoredPointRecord[];
     checkIns: StoredCheckIn[];
     emailCodes: StoredEmailCode[];
     settings: AuthSettings;
@@ -173,8 +188,9 @@ export function isQuotaExceededError(error: unknown): error is QuotaExceededErro
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 const EMAIL_CODE_MAX_AGE_MS = 1000 * 60 * 10;
 const EMAIL_CODE_RESEND_COOLDOWN_MS = 1000 * 60;
-export const DEFAULT_USER_QUOTA: UserQuota = { imageDaily: 100, videoDaily: 20, textDaily: 500, audioDaily: 100 };
-export const DEFAULT_CHECK_IN_REWARD: UserQuota = { imageDaily: 5, videoDaily: 1, textDaily: 20, audioDaily: 5 };
+export const DEFAULT_USER_POINTS = 100;
+export const DEFAULT_CHECK_IN_REWARD_POINTS = 5;
+const DEFAULT_MODEL_POINT_COST_KEY = "__default__";
 export const DEFAULT_SITE_SETTINGS: SiteSettings = {
     title: "VOZEB",
     logoUrl: "/logo.svg",
@@ -184,6 +200,7 @@ export const DEFAULT_SITE_SETTINGS: SiteSettings = {
     footerCopyright: "© 2026 VOZEB. All rights reserved.",
     termsUrl: "/terms",
     privacyUrl: "/privacy",
+    friendLinks: DEFAULT_SITE_FRIEND_LINKS,
     socials: DEFAULT_SITE_SOCIALS,
 };
 export const DEFAULT_MAIL_SETTINGS: MailSettings = {
@@ -202,8 +219,9 @@ const DEFAULT_SETTINGS: AuthSettings = {
     emailRegistrationEnabled: false,
     mail: DEFAULT_MAIL_SETTINGS,
     allowUserApiConfig: true,
-    defaultQuota: DEFAULT_USER_QUOTA,
-    checkInReward: DEFAULT_CHECK_IN_REWARD,
+    defaultPoints: DEFAULT_USER_POINTS,
+    checkInRewardPoints: DEFAULT_CHECK_IN_REWARD_POINTS,
+    modelPointCosts: {},
     systemChannels: [],
     defaultModels: { imageModel: "", videoModel: "", textModel: "", audioModel: "" },
 };
@@ -232,6 +250,14 @@ export async function listPublicUsers() {
     return db.users.map((user) => toPublicUser(user, db)).sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
 }
 
+export async function listPointRecords(userId: string, limit = 50) {
+    const db = await readAuthDb();
+    return (db.pointRecords || [])
+        .filter((record) => record.userId === userId)
+        .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+        .slice(0, Math.max(1, Math.min(200, Math.floor(Number(limit) || 50))));
+}
+
 export async function checkInUser(userId: string) {
     return mutateAuthDb((db) => {
         const user = db.users.find((item) => item.id === userId);
@@ -240,37 +266,48 @@ export async function checkInUser(userId: string) {
         const today = currentQuotaDate();
         if (db.checkIns.some((item) => item.userId === userId && item.date === today)) throw new AuthInputError("今天已经签到过了");
 
-        const reward = normalizeQuota(db.settings.checkInReward, DEFAULT_CHECK_IN_REWARD);
-        user.quota = addQuota(normalizeQuota(user.quota, db.settings.defaultQuota), reward);
+        const rewardPoints = normalizePoints(db.settings.checkInRewardPoints, DEFAULT_CHECK_IN_REWARD_POINTS);
+        user.pointsBalance = normalizePoints(user.pointsBalance, db.settings.defaultPoints) + rewardPoints;
         user.updatedAt = new Date().toISOString();
-        db.checkIns.push({ userId, date: today, reward, createdAt: user.updatedAt });
-        return { user: toPublicUser(user, db), reward, date: today };
+        db.checkIns.push({ userId, date: today, rewardPoints, createdAt: user.updatedAt });
+        addPointRecord(db, {
+            userId,
+            type: "check-in",
+            amount: rewardPoints,
+            balanceAfter: user.pointsBalance,
+            description: "每日签到",
+            createdAt: user.updatedAt,
+        });
+        return { user: toPublicUser(user, db), rewardPoints, date: today };
     });
 }
 
-export async function consumeUserQuota(userId: string, kind: QuotaKind, amount = 1) {
+export async function consumeUserPoints(userId: string, model: string, amount = 1) {
     return mutateAuthDb((db) => {
         const user = db.users.find((item) => item.id === userId);
         if (!user || user.status !== "active") throw new AuthInputError("账号不可用");
 
-        const quotaKey = quotaKeyByKind(kind);
-        const quota = normalizeQuota(user.quota, db.settings.defaultQuota);
-        const requested = Math.max(1, Math.min(1000, Math.floor(Number(amount) || 1)));
-        const today = currentQuotaDate();
-        const now = new Date().toISOString();
-        let usage = db.quotaUsage.find((item) => item.userId === userId && item.date === today);
-        if (!usage) {
-            usage = { userId, date: today, imageDaily: 0, videoDaily: 0, textDaily: 0, audioDaily: 0, updatedAt: now };
-            db.quotaUsage.push(usage);
+        const multiplier = resolveModelPointCost(db.settings.modelPointCosts, model);
+        const units = Math.max(1, Math.min(1000, Math.floor(Number(amount) || 1)));
+        const cost = Math.max(0, Math.ceil(units * multiplier));
+        const balance = normalizePoints(user.pointsBalance, db.settings.defaultPoints);
+
+        if (cost > balance) {
+            throw new QuotaExceededError(`积分不足，当前余额 ${balance}，本次需要 ${cost}`);
         }
 
-        if (usage[quotaKey] + requested > quota[quotaKey]) {
-            throw new QuotaExceededError(`今日${quotaKindLabel(kind)}额度不足，剩余 ${Math.max(0, quota[quotaKey] - usage[quotaKey])}`);
-        }
-
-        usage[quotaKey] += requested;
-        usage.updatedAt = now;
-        return { date: today, used: usage[quotaKey], limit: quota[quotaKey], remaining: Math.max(0, quota[quotaKey] - usage[quotaKey]) };
+        user.pointsBalance = balance - cost;
+        user.updatedAt = new Date().toISOString();
+        addPointRecord(db, {
+            userId,
+            type: "consume",
+            amount: -cost,
+            balanceAfter: user.pointsBalance,
+            description: `管理员接口调用：${model.trim()}`,
+            model: model.trim(),
+            createdAt: user.updatedAt,
+        });
+        return { model: model.trim(), units, multiplier, cost, remaining: user.pointsBalance };
     });
 }
 
@@ -298,7 +335,7 @@ export async function createUser(input: { username: string; email?: string; emai
             displayName,
             role: firstUser ? "admin" : "user",
             status: "active",
-            quota: db.settings.defaultQuota,
+            pointsBalance: db.settings.defaultPoints,
             passwordHash: hashPassword(input.password),
             createdAt: now,
             updatedAt: now,
@@ -456,7 +493,7 @@ export async function deleteSession(cookieValue: string | undefined) {
     });
 }
 
-export async function updateUserByAdmin(actorId: string, userId: string, patch: Partial<Pick<PublicUser, "displayName" | "email" | "role" | "status">> & { quota?: Partial<UserQuota>; password?: string }) {
+export async function updateUserByAdmin(actorId: string, userId: string, patch: Partial<Pick<PublicUser, "displayName" | "email" | "role" | "status" | "pointsBalance">> & { password?: string }) {
     return mutateAuthDb((db) => {
         const user = db.users.find((item) => item.id === userId);
         if (!user) throw new AuthInputError("用户不存在");
@@ -485,7 +522,21 @@ export async function updateUserByAdmin(actorId: string, userId: string, patch: 
         }
         user.role = nextRole;
         user.status = nextStatus;
-        if (patch.quota) user.quota = normalizeQuota(patch.quota, db.settings.defaultQuota);
+        if (patch.pointsBalance !== undefined) {
+            const previousBalance = normalizePoints(user.pointsBalance, 0);
+            user.pointsBalance = normalizePoints(patch.pointsBalance, user.pointsBalance);
+            const delta = user.pointsBalance - previousBalance;
+            if (delta !== 0) {
+                addPointRecord(db, {
+                    userId: user.id,
+                    type: "admin-adjust",
+                    amount: delta,
+                    balanceAfter: user.pointsBalance,
+                    description: "管理员后台调整",
+                    createdAt: new Date().toISOString(),
+                });
+            }
+        }
         user.updatedAt = new Date().toISOString();
         if (user.status !== "active") db.sessions = db.sessions.filter((session) => session.userId !== user.id);
         return toPublicUser(user, db);
@@ -500,7 +551,7 @@ export async function deleteUserByAdmin(actorId: string, userId: string) {
         if (user.role === "admin" && countActiveAdmins(db, user.id) === 0) throw new AuthInputError("至少需要保留一个管理员");
         db.users = db.users.filter((item) => item.id !== user.id);
         db.sessions = db.sessions.filter((session) => session.userId !== user.id);
-        db.quotaUsage = db.quotaUsage.filter((usage) => usage.userId !== user.id);
+        db.quotaUsage = db.quotaUsage.filter((usage) => !usage || typeof usage !== "object" || (usage as { userId?: unknown }).userId !== user.id);
         db.checkIns = db.checkIns.filter((checkIn) => checkIn.userId !== user.id);
         db.emailCodes = db.emailCodes.filter((code) => code.userId !== user.id);
         return { ok: true };
@@ -516,7 +567,7 @@ function toPublicUser(user: StoredUser, db?: AuthDatabase): PublicUser {
         displayName: user.displayName,
         role: user.role,
         status: user.status,
-        quota: normalizeQuota(user.quota, DEFAULT_USER_QUOTA),
+        pointsBalance: normalizePoints(user.pointsBalance, DEFAULT_USER_POINTS),
         checkedInToday: checkIn.checkedInToday,
         lastCheckInDate: checkIn.lastCheckInDate,
         createdAt: user.createdAt,
@@ -559,13 +610,17 @@ function normalizeDb(db: Partial<AuthDatabase>): AuthDatabase {
     return pruneExpiredSessions({
         version: 1,
         users: Array.isArray(db.users)
-            ? db.users.map((user) => ({
-                  ...user,
-                  quota: normalizeQuota(user.quota, settings.defaultQuota),
-              }))
+            ? db.users.map((user) => {
+                  const legacyUser = user as Partial<StoredUser> & { quota?: Partial<LegacyUserQuota> };
+                  return {
+                      ...user,
+                      pointsBalance: normalizePoints(legacyUser.pointsBalance, legacyQuotaToPoints(legacyUser.quota, settings.defaultPoints)),
+                  } as StoredUser;
+              })
             : [],
         sessions: Array.isArray(db.sessions) ? db.sessions : [],
-        quotaUsage: Array.isArray(db.quotaUsage) ? db.quotaUsage.map(normalizeQuotaUsage).filter(Boolean) : [],
+        quotaUsage: Array.isArray(db.quotaUsage) ? db.quotaUsage : [],
+        pointRecords: Array.isArray((db as Partial<AuthDatabase>).pointRecords) ? ((db as Partial<AuthDatabase>).pointRecords || []).map(normalizePointRecord).filter((item) => item.userId) : [],
         checkIns: Array.isArray(db.checkIns) ? db.checkIns.map(normalizeCheckIn).filter((item) => item.userId) : [],
         emailCodes: Array.isArray(db.emailCodes) ? db.emailCodes.map(normalizeEmailCode).filter((item) => item.email) : [],
         settings,
@@ -573,16 +628,15 @@ function normalizeDb(db: Partial<AuthDatabase>): AuthDatabase {
 }
 
 function emptyDb(): AuthDatabase {
-    return { version: 1, users: [], sessions: [], quotaUsage: [], checkIns: [], emailCodes: [], settings: DEFAULT_SETTINGS };
+    return { version: 1, users: [], sessions: [], quotaUsage: [], pointRecords: [], checkIns: [], emailCodes: [], settings: DEFAULT_SETTINGS };
 }
 
 function pruneExpiredSessions(db: AuthDatabase) {
     const now = Date.now();
     db.sessions = db.sessions.filter((session) => Date.parse(session.expiresAt) > now);
-    const minDate = new Date(now - 1000 * 60 * 60 * 24 * 45).toISOString().slice(0, 10);
-    db.quotaUsage = db.quotaUsage.filter((usage) => usage.date >= minDate);
     const minCheckInDate = new Date(now - 1000 * 60 * 60 * 24 * 365).toISOString().slice(0, 10);
     db.checkIns = db.checkIns.filter((checkIn) => checkIn.date >= minCheckInDate);
+    db.pointRecords = (db.pointRecords || []).slice(-10000);
     db.emailCodes = (db.emailCodes || []).filter((item) => !item.consumedAt && Date.parse(item.expiresAt) > now);
     return db;
 }
@@ -604,15 +658,16 @@ function normalizeDisplayName(value: string) {
 }
 
 function normalizeSettings(settings: AuthSettings): AuthSettings {
-    const defaultQuota = normalizeQuota(settings.defaultQuota, DEFAULT_USER_QUOTA);
+    const legacySettings = settings as AuthSettings & { defaultQuota?: Partial<LegacyUserQuota>; checkInReward?: Partial<LegacyUserQuota> };
     return {
         site: normalizeSiteSettings(settings.site),
         registrationEnabled: Boolean(settings.registrationEnabled),
         emailRegistrationEnabled: Boolean(settings.emailRegistrationEnabled),
         mail: normalizeMailSettings(settings.mail),
         allowUserApiConfig: settings.allowUserApiConfig !== false,
-        defaultQuota,
-        checkInReward: normalizeQuota(settings.checkInReward, DEFAULT_CHECK_IN_REWARD),
+        defaultPoints: normalizePoints(settings.defaultPoints, legacyQuotaToPoints(legacySettings.defaultQuota, DEFAULT_USER_POINTS)),
+        checkInRewardPoints: normalizePoints(settings.checkInRewardPoints, legacyQuotaToPoints(legacySettings.checkInReward, DEFAULT_CHECK_IN_REWARD_POINTS)),
+        modelPointCosts: normalizeModelPointCosts(settings.modelPointCosts),
         systemChannels: Array.isArray(settings.systemChannels) ? settings.systemChannels.map(normalizeSystemChannel).filter((channel) => channel.name || channel.baseUrl || channel.models.length) : [],
         defaultModels: {
             imageModel: settings.defaultModels?.imageModel || "",
@@ -635,8 +690,25 @@ function normalizeSiteSettings(settings: Partial<SiteSettings> | undefined): Sit
         footerCopyright: normalizeText(settings?.footerCopyright, DEFAULT_SITE_SETTINGS.footerCopyright, 120),
         termsUrl: normalizeLinkUrl(settings?.termsUrl, DEFAULT_SITE_SETTINGS.termsUrl),
         privacyUrl: normalizeLinkUrl(settings?.privacyUrl, DEFAULT_SITE_SETTINGS.privacyUrl),
+        friendLinks: normalizeSiteFriendLinks(settings?.friendLinks),
         socials: normalizeSiteSocials(settings?.socials),
     };
+}
+
+function normalizeSiteFriendLinks(settings: unknown): SiteFriendLink[] {
+    const links = Array.isArray(settings) ? settings : DEFAULT_SITE_FRIEND_LINKS;
+    return links
+        .map((link, index) => {
+            const value = link as Partial<SiteFriendLink>;
+            return {
+                id: normalizeText(value.id, `friend-${index + 1}`, 80),
+                label: normalizeText(value.label, "友情链接", 32),
+                url: normalizeLinkUrl(value.url, ""),
+                enabled: value.enabled !== false,
+            };
+        })
+        .filter((link) => link.url)
+        .slice(0, 12);
 }
 
 function normalizeSiteSocials(settings: Partial<SiteSocialSettings> | undefined): SiteSocialSettings {
@@ -702,40 +774,65 @@ function normalizeSystemChannel(channel: Partial<SystemModelChannel>): SystemMod
     };
 }
 
-function normalizeQuota(quota: Partial<UserQuota> | undefined, fallback: UserQuota): UserQuota {
-    return {
-        imageDaily: normalizeQuotaNumber(quota?.imageDaily, fallback.imageDaily),
-        videoDaily: normalizeQuotaNumber(quota?.videoDaily, fallback.videoDaily),
-        textDaily: normalizeQuotaNumber(quota?.textDaily, fallback.textDaily),
-        audioDaily: normalizeQuotaNumber(quota?.audioDaily, fallback.audioDaily),
-    };
-}
-
-function normalizeQuotaNumber(value: unknown, fallback: number) {
+function normalizePoints(value: unknown, fallback: number) {
     const numberValue = Math.floor(Number(value));
     if (!Number.isFinite(numberValue) || numberValue < 0) return fallback;
     return Math.min(numberValue, 1_000_000);
 }
 
-function normalizeQuotaUsage(value: Partial<StoredQuotaUsage>): StoredQuotaUsage {
-    return {
-        userId: value.userId || "",
-        date: /^\d{4}-\d{2}-\d{2}$/.test(value.date || "") ? value.date! : currentQuotaDate(),
-        imageDaily: normalizeQuotaNumber(value.imageDaily, 0),
-        videoDaily: normalizeQuotaNumber(value.videoDaily, 0),
-        textDaily: normalizeQuotaNumber(value.textDaily, 0),
-        audioDaily: normalizeQuotaNumber(value.audioDaily, 0),
-        updatedAt: value.updatedAt || new Date().toISOString(),
-    };
+function normalizePointMultiplier(value: unknown, fallback = 1) {
+    const numberValue = Number(value);
+    if (!Number.isFinite(numberValue) || numberValue < 0) return fallback;
+    return Math.min(Number(numberValue.toFixed(2)), 1_000_000);
+}
+
+function normalizeModelPointCosts(value: unknown): ModelPointCosts {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    return Object.fromEntries(
+        Object.entries(value as Record<string, unknown>)
+            .map(([model, cost]) => [model.trim(), normalizePointMultiplier(cost)] as const)
+            .filter(([model]) => Boolean(model)),
+    );
+}
+
+function resolveModelPointCost(costs: ModelPointCosts, model: string) {
+    const modelName = model.trim();
+    const matchedKey = Object.keys(costs || {}).find((key) => key.toLowerCase() === modelName.toLowerCase());
+    return normalizePointMultiplier(costs[matchedKey || DEFAULT_MODEL_POINT_COST_KEY], 1);
+}
+
+function legacyQuotaToPoints(quota: Partial<LegacyUserQuota> | undefined, fallback: number) {
+    if (!quota || typeof quota !== "object") return fallback;
+    return normalizePoints(quota.imageDaily, fallback);
 }
 
 function normalizeCheckIn(value: Partial<StoredCheckIn>): StoredCheckIn {
+    const legacy = value as Partial<StoredCheckIn> & { reward?: Partial<LegacyUserQuota> };
     return {
         userId: value.userId || "",
         date: /^\d{4}-\d{2}-\d{2}$/.test(value.date || "") ? value.date! : currentQuotaDate(),
-        reward: normalizeQuota(value.reward, DEFAULT_CHECK_IN_REWARD),
+        rewardPoints: normalizePoints(value.rewardPoints, legacyQuotaToPoints(legacy.reward, DEFAULT_CHECK_IN_REWARD_POINTS)),
         createdAt: value.createdAt || new Date().toISOString(),
     };
+}
+
+function normalizePointRecord(value: Partial<StoredPointRecord>): StoredPointRecord {
+    const type = value.type === "consume" || value.type === "admin-adjust" ? value.type : "check-in";
+    return {
+        id: value.id || randomUUID(),
+        userId: value.userId || "",
+        type,
+        amount: Number.isFinite(Number(value.amount)) ? Number(value.amount) : 0,
+        balanceAfter: normalizePoints(value.balanceAfter, 0),
+        description: normalizeText(value.description, type === "consume" ? "积分消耗" : "积分增加", 120),
+        model: typeof value.model === "string" ? value.model.slice(0, 160) : undefined,
+        createdAt: value.createdAt || new Date().toISOString(),
+    };
+}
+
+function addPointRecord(db: AuthDatabase, record: Omit<StoredPointRecord, "id">) {
+    db.pointRecords = db.pointRecords || [];
+    db.pointRecords.push({ id: randomUUID(), ...record });
 }
 
 function normalizeEmailCode(value: Partial<StoredEmailCode>): StoredEmailCode {
@@ -760,15 +857,6 @@ function consumeEmailCode(db: AuthDatabase, input: { purpose: EmailCodePurpose; 
     item.consumedAt = new Date().toISOString();
 }
 
-function addQuota(current: UserQuota, reward: UserQuota): UserQuota {
-    return {
-        imageDaily: normalizeQuotaNumber(current.imageDaily + reward.imageDaily, current.imageDaily),
-        videoDaily: normalizeQuotaNumber(current.videoDaily + reward.videoDaily, current.videoDaily),
-        textDaily: normalizeQuotaNumber(current.textDaily + reward.textDaily, current.textDaily),
-        audioDaily: normalizeQuotaNumber(current.audioDaily + reward.audioDaily, current.audioDaily),
-    };
-}
-
 function userCheckInState(db: AuthDatabase, userId: string) {
     const today = currentQuotaDate();
     const dates = db.checkIns
@@ -777,20 +865,6 @@ function userCheckInState(db: AuthDatabase, userId: string) {
         .sort();
     const lastCheckInDate = dates[dates.length - 1];
     return { checkedInToday: lastCheckInDate === today, lastCheckInDate };
-}
-
-function quotaKeyByKind(kind: QuotaKind): keyof UserQuota {
-    if (kind === "video") return "videoDaily";
-    if (kind === "text") return "textDaily";
-    if (kind === "audio") return "audioDaily";
-    return "imageDaily";
-}
-
-function quotaKindLabel(kind: QuotaKind) {
-    if (kind === "video") return "视频";
-    if (kind === "text") return "文本";
-    if (kind === "audio") return "音频";
-    return "图片";
 }
 
 function currentQuotaDate() {

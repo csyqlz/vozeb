@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { consumeUserQuota, getAuthSettings, isQuotaExceededError, type ApiCallFormat, type QuotaKind } from "@/lib/auth/store";
+import { consumeUserPoints, getAuthSettings, isQuotaExceededError, type ApiCallFormat } from "@/lib/auth/store";
 import { getCurrentUser } from "@/lib/auth/session";
 
 export const runtime = "nodejs";
@@ -49,10 +49,11 @@ async function proxySystemRequest(request: Request, context: RouteContext) {
     else headers.set("authorization", `Bearer ${channel.apiKey}`);
 
     const body = request.method === "GET" || request.method === "HEAD" ? undefined : await request.arrayBuffer();
-    const quotaRequest = classifyQuotaRequest(request.method, channel.apiFormat, path, contentType, body);
-    if (quotaRequest) {
+    const pointsRequest = classifyPointsRequest(request.method, channel.apiFormat, path, contentType, body);
+    let pointsResult: Awaited<ReturnType<typeof consumeUserPoints>> | null = null;
+    if (pointsRequest) {
         try {
-            await consumeUserQuota(currentUser.id, quotaRequest.kind, quotaRequest.amount);
+            pointsResult = await consumeUserPoints(currentUser.id, pointsRequest.model, pointsRequest.amount);
         } catch (error) {
             if (isQuotaExceededError(error)) return NextResponse.json({ error: error.message }, { status: error.status });
             throw error;
@@ -69,36 +70,64 @@ async function proxySystemRequest(request: Request, context: RouteContext) {
     return new Response(upstream.body, {
         status: upstream.status,
         statusText: upstream.statusText,
-        headers: responseHeaders(upstream.headers),
+        headers: responseHeaders(upstream.headers, pointsResult),
     });
 }
 
-function classifyQuotaRequest(method: string, apiFormat: ApiCallFormat, path: string[], contentType: string | null, body?: ArrayBuffer): { kind: QuotaKind; amount: number } | null {
+function classifyPointsRequest(method: string, apiFormat: ApiCallFormat, path: string[], contentType: string | null, body?: ArrayBuffer): { model: string; amount: number } | null {
     if (method.toUpperCase() !== "POST") return null;
     const cleanPath = path[0] === "v1" || path[0] === "v1beta" ? path.slice(1) : path;
     const routePath = `/${cleanPath.join("/")}`.toLowerCase();
+    const model = readRequestModel(contentType, body) || readPathModel(cleanPath);
+    if (!model) return null;
 
     if (routePath === "/images/generations" || routePath === "/images/edits") {
-        return { kind: "image", amount: readJsonCount(contentType, body) };
+        return { model, amount: readRequestCount(contentType, body) };
     }
-    if (routePath === "/audio/speech") return { kind: "audio", amount: 1 };
-    if (routePath === "/videos" || routePath === "/contents/generations/tasks") return { kind: "video", amount: 1 };
-    if (routePath === "/responses" || routePath === "/chat/completions") return { kind: "text", amount: 1 };
-    if (apiFormat === "gemini" && routePath.includes(":streamgeneratecontent")) return { kind: "text", amount: 1 };
-    if (apiFormat === "gemini" && routePath.includes(":generatecontent")) return { kind: "image", amount: 1 };
+    if (routePath === "/audio/speech") return { model, amount: 1 };
+    if (routePath === "/videos" || routePath === "/contents/generations/tasks") return { model, amount: 1 };
+    if (routePath === "/responses" || routePath === "/chat/completions") return { model, amount: 1 };
+    if (apiFormat === "gemini" && routePath.includes(":streamgeneratecontent")) return { model, amount: 1 };
+    if (apiFormat === "gemini" && routePath.includes(":generatecontent")) return { model, amount: 1 };
 
     return null;
 }
 
-function readJsonCount(contentType: string | null, body?: ArrayBuffer) {
-    if (!body || !contentType?.toLowerCase().includes("application/json")) return 1;
+function readRequestModel(contentType: string | null, body?: ArrayBuffer) {
+    const payload = readRequestBody(contentType, body);
+    return typeof payload.model === "string" ? payload.model.trim() : "";
+}
+
+function readPathModel(path: string[]) {
+    const modelIndex = path.findIndex((item) => item === "models");
+    if (modelIndex < 0) return "";
+    return decodeURIComponent(path[modelIndex + 1] || "").split(":")[0].replace(/^models\//, "").trim();
+}
+
+function readRequestCount(contentType: string | null, body?: ArrayBuffer) {
+    const payload = readRequestBody(contentType, body);
+    const count = Math.floor(Number(payload.n) || 1);
+    return Math.max(1, Math.min(1000, count));
+}
+
+function readRequestBody(contentType: string | null, body?: ArrayBuffer): Record<string, unknown> {
+    if (!body) return {};
+    const text = new TextDecoder().decode(body);
+    if (!contentType?.toLowerCase().includes("application/json")) return readMultipartFields(text);
     try {
-        const payload = JSON.parse(new TextDecoder().decode(body)) as { n?: unknown };
-        const count = Math.floor(Number(payload.n) || 1);
-        return Math.max(1, Math.min(1000, count));
+        return JSON.parse(text) as Record<string, unknown>;
     } catch {
-        return 1;
+        return {};
     }
+}
+
+function readMultipartFields(text: string): Record<string, string> {
+    const fields: Record<string, string> = {};
+    for (const key of ["model", "n"]) {
+        const match = text.match(new RegExp(`name="${key}"\\r?\\n\\r?\\n([^\\r\\n]+)`));
+        if (match?.[1]) fields[key] = match[1].trim();
+    }
+    return fields;
 }
 
 function targetUrl(baseUrl: string, apiFormat: "openai" | "gemini", path: string[], search: string) {
@@ -115,12 +144,16 @@ function normalizeApiBaseUrl(baseUrl: string, apiFormat: "openai" | "gemini") {
     return `${normalized}/v1`;
 }
 
-function responseHeaders(headers: Headers) {
+function responseHeaders(headers: Headers, pointsResult?: Awaited<ReturnType<typeof consumeUserPoints>> | null) {
     const nextHeaders = new Headers();
     const passthrough = ["content-type", "cache-control", "content-disposition"];
     passthrough.forEach((key) => {
         const value = headers.get(key);
         if (value) nextHeaders.set(key, value);
     });
+    if (pointsResult) {
+        nextHeaders.set("x-vozeb-points-cost", String(pointsResult.cost));
+        nextHeaders.set("x-vozeb-points-remaining", String(pointsResult.remaining));
+    }
     return nextHeaders;
 }

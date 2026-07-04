@@ -9,6 +9,7 @@ import { saveAs } from "file-saver";
 import { ImageSettingsPanel } from "@/components/image-settings-panel";
 import { ModelPicker } from "@/components/model-picker";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
+import { requestCreditCost } from "@/constant/credits";
 import { AssetPickerModal, type InsertAssetPayload } from "@/app/(user)/canvas/components/asset-picker-modal";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { imageReferenceLabel } from "@/lib/image-reference-prompt";
@@ -94,6 +95,7 @@ export default function ImagePage() {
     const model = effectiveConfig.imageModel || effectiveConfig.model;
     const canGenerate = Boolean(prompt.trim());
     const generationCount = Math.max(1, Math.min(10, Number(config.count) || 1));
+    const pointsCost = requestCreditCost({ apiSource: effectiveConfig.apiSource, modelPointCosts: effectiveConfig.modelPointCosts, model, count: generationCount });
 
     useEffect(() => {
         if (!running || !startedAt) return;
@@ -409,8 +411,14 @@ export default function ImagePage() {
                         </div>
 
                         <div className="mt-auto pt-6">
-                            <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} loading={running} disabled={!canGenerate || running} onClick={() => void generate()}>
-                                开始生成
+                            <Button type="primary" size="large" block loading={running} disabled={!canGenerate || running} onClick={() => void generate()}>
+                                <span className="inline-flex items-center justify-center gap-2">
+                                    <span className="inline-flex items-center gap-1.5 tabular-nums">
+                                        <Sparkles className="size-[17px]" />
+                                        <span className="text-sm font-semibold leading-none">{pointsCost.toLocaleString()}</span>
+                                    </span>
+                                    <span>开始生成</span>
+                                </span>
                             </Button>
                         </div>
                     </div>
@@ -486,7 +494,7 @@ function GenerationSettings({ config, model, updateConfig, openConfigDialog }: {
         <>
             <label className="col-span-2 block min-w-0 sm:col-span-1">
                 <span className="mb-1.5 block text-sm font-semibold sm:mb-2 sm:text-base">模型</span>
-                <ModelPicker config={config} value={model} onChange={(value) => updateConfig("imageModel", value)} capability="image" fullWidth onMissingConfig={() => openConfigDialog(false)} />
+                <ModelPicker config={config} value={model} onChange={(value) => updateConfig("imageModel", value)} capability="image" fullWidth onMissingConfig={() => openConfigDialog(true)} />
             </label>
             <div className="col-span-2">
                 <ImageSettingsPanel config={config} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-4" maxCount={10} />

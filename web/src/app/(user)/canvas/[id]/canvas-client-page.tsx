@@ -2938,7 +2938,11 @@ function CanvasTopBar({
                     <Button
                         type="text"
                         className="!h-10 !rounded-xl !px-3 !font-medium"
-                        style={{ background: agentOpen ? theme.toolbar.activeBg : theme.toolbar.panel, color: theme.node.text, boxShadow: "0 10px 30px rgba(28,25,23,.10)" }}
+                        style={{
+                            background: agentOpen ? theme.toolbar.activeBg : theme.toolbar.panel,
+                            color: agentOpen ? theme.toolbar.activeText : theme.node.text,
+                            boxShadow: colorTheme === "dark" ? "0 10px 30px rgba(0,0,0,.34)" : "0 10px 30px rgba(28,25,23,.10)",
+                        }}
                         icon={<Bot className="size-4" />}
                         onClick={onToggleAgent}
                     >

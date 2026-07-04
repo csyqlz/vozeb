@@ -17,15 +17,15 @@ export async function PATCH(request: Request, context: RouteContext) {
 
     try {
         const { id } = await context.params;
-        const body = await readJsonBody<{ displayName?: unknown; email?: unknown; password?: unknown; role?: unknown; status?: unknown; quota?: unknown }>(request);
-        const patch: { displayName?: string; email?: string; password?: string; role?: UserRole; status?: UserStatus; quota?: { imageDaily?: number; videoDaily?: number; textDaily?: number; audioDaily?: number } } = {};
+        const body = await readJsonBody<{ displayName?: unknown; email?: unknown; password?: unknown; role?: unknown; status?: unknown; pointsBalance?: unknown }>(request);
+        const patch: { displayName?: string; email?: string; password?: string; role?: UserRole; status?: UserStatus; pointsBalance?: number } = {};
 
         if (typeof body.displayName === "string") patch.displayName = body.displayName;
         if (typeof body.email === "string") patch.email = body.email;
         if (typeof body.password === "string" && body.password) patch.password = body.password;
         if (body.role === "admin" || body.role === "user") patch.role = body.role;
         if (body.status === "active" || body.status === "disabled") patch.status = body.status;
-        if (body.quota && typeof body.quota === "object") patch.quota = body.quota as typeof patch.quota;
+        if (body.pointsBalance !== undefined) patch.pointsBalance = Number(body.pointsBalance);
 
         const user = await updateUserByAdmin(currentUser.id, id, patch);
         return NextResponse.json({ user });

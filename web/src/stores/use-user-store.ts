@@ -10,12 +10,7 @@ export type LocalUser = {
     avatarUrl?: string;
     role: "admin" | "user";
     status: "active" | "disabled";
-    quota: {
-        imageDaily: number;
-        videoDaily: number;
-        textDaily: number;
-        audioDaily: number;
-    };
+    pointsBalance: number;
     checkedInToday: boolean;
     lastCheckInDate?: string;
 };

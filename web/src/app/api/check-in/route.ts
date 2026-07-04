@@ -14,7 +14,7 @@ export async function POST() {
         const result = await checkInUser(currentUser.id);
         return NextResponse.json({
             user: serializeCurrentUser(result.user),
-            reward: result.reward,
+            rewardPoints: result.rewardPoints,
             date: result.date,
         });
     } catch (error) {

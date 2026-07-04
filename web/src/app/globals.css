@@ -179,6 +179,21 @@
         align-items: flex-start;
     }
 
+    .hero-version-badge {
+        margin-top: -4px;
+    }
+
+    @media (min-width: 768px) {
+        .hero-version-badge {
+            left: calc(50% + clamp(210px, 28vw, 360px));
+            margin-top: 0;
+            position: absolute;
+            top: clamp(16px, 2.6vw, 42px);
+            transform: translateX(-8%);
+            z-index: 2;
+        }
+    }
+
     .hero-title-stage {
         margin-top: clamp(24px, 3.6vw, 42px);
         padding: clamp(16px, 2.6vw, 30px) clamp(12px, 2.4vw, 28px) 0;
@@ -842,6 +857,54 @@
         background: linear-gradient(135deg, rgba(8, 47, 73, 0.42), rgba(28, 25, 23, 0.5));
         border-color: rgba(103, 232, 249, 0.16);
         box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    }
+
+    .admin-mobile-safe,
+    .admin-mobile-safe section,
+    .admin-mobile-safe form,
+    .admin-mobile-safe label,
+    .admin-mobile-safe div {
+        min-width: 0;
+    }
+
+    .admin-mobile-safe .ant-table-wrapper,
+    .admin-mobile-safe .ant-table,
+    .admin-mobile-safe .ant-table-container {
+        max-width: 100%;
+    }
+
+    .admin-mobile-safe .ant-table-content {
+        overflow-x: auto !important;
+    }
+
+    .admin-mobile-safe .ant-input,
+    .admin-mobile-safe .ant-input-affix-wrapper,
+    .admin-mobile-safe .ant-input-number,
+    .admin-mobile-safe .ant-input-number-group-wrapper,
+    .admin-mobile-safe .ant-select,
+    .admin-mobile-safe .ant-select-selector {
+        max-width: 100%;
+    }
+
+    .admin-mobile-safe .ant-space {
+        max-width: 100%;
+    }
+
+    .admin-mobile-safe .ant-pagination {
+        flex-wrap: wrap;
+        row-gap: 8px;
+    }
+
+    @media (max-width: 640px) {
+        .admin-mobile-safe .ant-btn {
+            max-width: 100%;
+            white-space: normal;
+        }
+
+        .admin-mobile-safe .ant-popover,
+        .admin-mobile-safe .ant-popconfirm {
+            max-width: calc(100vw - 24px);
+        }
     }
 
     @media (max-width: 760px) {
@@ -1576,6 +1639,25 @@
         white-space: nowrap;
     }
 
+    .dark .canvas-generate-button.ant-btn-primary:not(.ant-btn-dangerous):not(:disabled) {
+        background: #f5f5f4;
+        border-color: #f5f5f4;
+        color: #111827;
+        box-shadow: 0 10px 24px rgba(0, 0, 0, 0.26);
+    }
+
+    .dark .canvas-generate-button.ant-btn-primary:not(.ant-btn-dangerous):not(:disabled):hover {
+        background: #ffffff;
+        border-color: #ffffff;
+        color: #020617;
+    }
+
+    .dark .canvas-generate-button.ant-btn-primary:disabled {
+        background: rgba(245, 245, 244, 0.36);
+        border-color: rgba(245, 245, 244, 0.22);
+        color: rgba(17, 24, 39, 0.7);
+    }
+
     @container (min-width: 440px) {
         .canvas-composer-mode-button {
             padding-inline: 8px;
@@ -1652,6 +1734,85 @@
         box-shadow: 0 18px 54px rgba(0, 0, 0, 0.45);
     }
 
+    .canvas-image-toolbar-settings-modal .ant-checkbox-wrapper {
+        color: inherit;
+    }
+
+    .canvas-image-toolbar-settings-modal .ant-checkbox-inner {
+        border-color: rgba(120, 113, 108, 0.72);
+    }
+
+    .canvas-image-toolbar-settings-modal .ant-checkbox-wrapper:hover .ant-checkbox-inner,
+    .canvas-image-toolbar-settings-modal .ant-checkbox:hover .ant-checkbox-inner {
+        border-color: #111827;
+    }
+
+    .canvas-image-toolbar-settings-modal .ant-checkbox-checked .ant-checkbox-inner {
+        background-color: #111827 !important;
+        border-color: #111827 !important;
+        box-shadow: 0 0 0 2px rgba(17, 24, 39, 0.16);
+    }
+
+    .canvas-image-toolbar-settings-modal .ant-checkbox-checked .ant-checkbox-inner::after {
+        border-color: #ffffff !important;
+        border-width: 2px;
+    }
+
+    .canvas-image-toolbar-settings-modal .ant-checkbox-disabled .ant-checkbox-inner {
+        background-color: rgba(120, 113, 108, 0.12);
+        border-color: rgba(120, 113, 108, 0.45);
+    }
+
+    .dark .canvas-image-toolbar-settings-modal .ant-checkbox-wrapper {
+        color: #e7e5e4;
+    }
+
+    .dark .canvas-image-toolbar-settings-modal .ant-checkbox-inner {
+        background-color: rgba(255, 255, 255, 0.06);
+        border-color: rgba(214, 211, 209, 0.72);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+    }
+
+    .dark .canvas-image-toolbar-settings-modal .ant-checkbox-wrapper:hover .ant-checkbox-inner,
+    .dark .canvas-image-toolbar-settings-modal .ant-checkbox:hover .ant-checkbox-inner {
+        background-color: rgba(255, 255, 255, 0.12);
+        border-color: #f8fafc;
+    }
+
+    .dark .canvas-image-toolbar-settings-modal .ant-checkbox-checked .ant-checkbox-inner {
+        background-color: #f8fafc !important;
+        border-color: #ffffff !important;
+        box-shadow: 0 0 0 2px rgba(248, 250, 252, 0.26);
+    }
+
+    .dark .canvas-image-toolbar-settings-modal .ant-checkbox-checked .ant-checkbox-inner::after {
+        border-color: #0f172a !important;
+    }
+
+    .dark .canvas-image-toolbar-settings-modal .ant-switch {
+        background: rgba(120, 113, 108, 0.72);
+        border: 1px solid rgba(231, 229, 228, 0.2);
+        min-width: 44px;
+    }
+
+    .dark .canvas-image-toolbar-settings-modal .ant-switch .ant-switch-handle::before {
+        background: #fafaf9;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.32);
+    }
+
+    .dark .canvas-image-toolbar-settings-modal .ant-switch:hover:not(.ant-switch-disabled) {
+        background: rgba(168, 162, 158, 0.82);
+    }
+
+    .dark .canvas-image-toolbar-settings-modal .ant-switch.ant-switch-checked {
+        background: #f8fafc;
+        border-color: #ffffff;
+    }
+
+    .dark .canvas-image-toolbar-settings-modal .ant-switch.ant-switch-checked:hover:not(.ant-switch-disabled) {
+        background: #ffffff;
+    }
+
     .canvas-node-info-modal .ant-modal-header {
         padding-right: 0;
     }
@@ -1718,4 +1879,122 @@
 ::view-transition-new(root) {
     animation: none;
     mix-blend-mode: normal;
+}
+
+.canvas-image-toolbar-settings-modal .canvas-toolbar-tool-check {
+    color: #1f2937;
+}
+
+.canvas-image-toolbar-settings-modal .canvas-toolbar-tool-check:hover {
+    color: #0f172a;
+}
+
+.canvas-image-toolbar-settings-modal .canvas-toolbar-tool-check-box {
+    align-items: center;
+    background: #ffffff;
+    border: 1px solid #94a3b8;
+    border-radius: 5px;
+    box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.04);
+    color: transparent;
+    display: inline-flex;
+    height: 16px;
+    justify-content: center;
+    width: 16px;
+}
+
+.canvas-image-toolbar-settings-modal .canvas-toolbar-tool-check:hover .canvas-toolbar-tool-check-box {
+    background: #f8fafc;
+    border-color: #0f172a;
+}
+
+.canvas-image-toolbar-settings-modal .canvas-toolbar-tool-check.is-selected .canvas-toolbar-tool-check-box {
+    background: #0f172a;
+    border-color: #0f172a;
+    box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.14);
+    color: #ffffff;
+}
+
+html.dark .canvas-image-toolbar-settings-modal .ant-form-item-label > label,
+html.dark .canvas-image-toolbar-settings-modal .ant-modal-footer,
+html.dark .canvas-image-toolbar-settings-modal .canvas-toolbar-tool-check {
+    color: #f4f4f5;
+}
+
+html.dark .canvas-image-toolbar-settings-modal .canvas-toolbar-tool-check {
+    color: #e4e4e7;
+}
+
+html.dark .canvas-image-toolbar-settings-modal .canvas-toolbar-tool-check:hover {
+    color: #ffffff;
+}
+
+html.dark .canvas-image-toolbar-settings-modal .canvas-toolbar-tool-check-box {
+    align-items: center;
+    background: #0b0f14;
+    border: 1px solid #a1a1aa;
+    border-radius: 5px;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+    color: transparent;
+    display: inline-flex;
+    height: 16px;
+    justify-content: center;
+    width: 16px;
+}
+
+html.dark .canvas-image-toolbar-settings-modal .canvas-toolbar-tool-check:hover .canvas-toolbar-tool-check-box {
+    background: #111827;
+    border-color: #f8fafc;
+}
+
+html.dark .canvas-image-toolbar-settings-modal .canvas-toolbar-tool-check.is-selected .canvas-toolbar-tool-check-box {
+    background: #f8fafc;
+    border-color: #ffffff;
+    box-shadow: 0 0 0 2px rgba(248, 250, 252, 0.28), inset 0 0 0 1px rgba(15, 23, 42, 0.08);
+    color: #0f172a;
+}
+
+html.dark .canvas-image-toolbar-settings-modal .ant-switch.ant-switch-checked {
+    background: #f8fafc !important;
+    border-color: #ffffff !important;
+    box-shadow: 0 0 0 2px rgba(248, 250, 252, 0.28) !important;
+}
+
+html.dark .canvas-image-toolbar-settings-modal .ant-switch.ant-switch-checked .ant-switch-handle::before {
+    background: #0f172a !important;
+}
+
+html.dark .canvas-image-toolbar-settings-modal .ant-switch.ant-switch-checked:hover:not(.ant-switch-disabled) {
+    background: #ffffff !important;
+    border-color: #ffffff !important;
+}
+
+html.dark .canvas-agent-confirm-switch.ant-switch {
+    background: #272a33 !important;
+    border: 1px solid #5b6472 !important;
+    min-width: 40px;
+}
+
+html.dark .canvas-agent-confirm-switch.ant-switch:hover:not(.ant-switch-disabled) {
+    background: #323746 !important;
+    border-color: #8b949e !important;
+}
+
+html.dark .canvas-agent-confirm-switch.ant-switch .ant-switch-handle::before {
+    background: #f8fafc !important;
+    box-shadow: 0 2px 7px rgba(0, 0, 0, 0.4);
+}
+
+html.dark .canvas-agent-confirm-switch.ant-switch.ant-switch-checked {
+    background: #f8fafc !important;
+    border-color: #ffffff !important;
+    box-shadow: 0 0 0 2px rgba(248, 250, 252, 0.28) !important;
+}
+
+html.dark .canvas-agent-confirm-switch.ant-switch.ant-switch-checked .ant-switch-handle::before {
+    background: #0f172a !important;
+}
+
+html.dark .canvas-agent-confirm-switch.ant-switch.ant-switch-checked:hover:not(.ant-switch-disabled) {
+    background: #ffffff !important;
+    border-color: #ffffff !important;
 }

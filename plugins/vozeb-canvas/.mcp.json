@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "infinite-canvas": {
+    "vozeb-canvas": {
       "command": "npx",
       "args": ["-y", "@basketikun/canvas-agent", "mcp"],
       "startup_timeout_sec": 20,

@@ -743,7 +743,7 @@ export function CanvasAssistantPanel({
                     <div className="flex shrink-0 items-center gap-2">
                         <AgentModeSwitch value={agentMode} theme={theme} onChange={onAgentModeChange} />
                         <label className="flex items-center gap-1.5 text-xs" style={{ color: theme.node.muted }}>
-                            <Switch size="small" checked={confirmTools} onChange={(confirmTools) => setAgentState({ confirmTools })} />
+                            <Switch className="canvas-agent-confirm-switch" size="small" checked={confirmTools} onChange={(confirmTools) => setAgentState({ confirmTools })} />
                             工具确认
                         </label>
                         <Tooltip title="收起对话">

@@ -48,7 +48,7 @@ export function serializeCurrentUser(user: CurrentUser) {
         displayName: user.displayName,
         role: user.role,
         status: user.status,
-        quota: user.quota,
+        pointsBalance: user.pointsBalance,
         checkedInToday: user.checkedInToday,
         lastCheckInDate: user.lastCheckInDate,
         createdAt: user.createdAt,
@@ -63,8 +63,9 @@ export function serializePublicSettings(settings: AuthSettings) {
         registrationEnabled: settings.registrationEnabled,
         emailRegistrationEnabled: settings.emailRegistrationEnabled,
         allowUserApiConfig: settings.allowUserApiConfig,
-        defaultQuota: settings.defaultQuota,
-        checkInReward: settings.checkInReward,
+        defaultPoints: settings.defaultPoints,
+        checkInRewardPoints: settings.checkInRewardPoints,
+        modelPointCosts: settings.modelPointCosts,
         defaultModels: settings.defaultModels,
         systemChannels: settings.systemChannels
             .filter((channel) => channel.enabled)

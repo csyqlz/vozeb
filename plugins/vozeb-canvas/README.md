@@ -1,6 +1,6 @@
-# Infinite Canvas Codex Plugin
+# VOZEB Canvas Codex Plugin
 
-这个插件把 Infinite Canvas 的本地 Canvas Agent MCP 打包给 Codex app 使用，让 Codex 能打开本地画布、读取当前节点、创建内容并触发生成流程。
+这个插件把 VOZEB Canvas 的本地 Canvas Agent MCP 打包给 Codex app 使用，让 Codex 能打开本地画布、读取当前节点、创建内容并触发生成流程。
 
 ## 安装
 
@@ -10,9 +10,9 @@
 
 ```text
 请从 https://github.com/csyqlz/vozeb.git 安装 VOZEB Codex 插件。
-请 clone 仓库到 ~/plugins/infinite-canvas，确认 plugins/infinite-canvas/.codex-plugin/plugin.json 存在，
-把 plugins/infinite-canvas 加入 personal marketplace，先运行 codex plugin marketplace add ~，
-再运行 codex plugin add infinite-canvas@personal。
+请 clone 仓库到 ~/plugins/vozeb-canvas，确认 plugins/vozeb-canvas/.codex-plugin/plugin.json 存在，
+把 plugins/vozeb-canvas 加入 personal marketplace，先运行 codex plugin marketplace add ~，
+再运行 codex plugin add vozeb-canvas@personal。
 安装后请校验插件，并告诉我是否需要开启一个新对话来加载新技能和 MCP 工具。
 ```
 
@@ -22,10 +22,10 @@
 
 ```bash
 mkdir -p ~/plugins
-git clone https://github.com/csyqlz/vozeb.git ~/plugins/infinite-canvas
+git clone https://github.com/csyqlz/vozeb.git ~/plugins/vozeb-canvas
 ```
 
-确保 `~/.agents/plugins/marketplace.json` 中有 Infinite Canvas 条目，注意 `path` 指向仓库里的插件子目录：
+确保 `~/.agents/plugins/marketplace.json` 中有 VOZEB Canvas 条目，注意 `path` 指向仓库里的插件子目录：
 
 ```json
 {
@@ -35,10 +35,10 @@ git clone https://github.com/csyqlz/vozeb.git ~/plugins/infinite-canvas
   },
   "plugins": [
     {
-      "name": "infinite-canvas",
+      "name": "vozeb-canvas",
       "source": {
         "source": "local",
-        "path": "./plugins/infinite-canvas/plugins/infinite-canvas"
+        "path": "./plugins/vozeb-canvas/plugins/vozeb-canvas"
       },
       "policy": {
         "installation": "AVAILABLE",
@@ -54,32 +54,32 @@ git clone https://github.com/csyqlz/vozeb.git ~/plugins/infinite-canvas
 
 ```bash
 codex plugin marketplace add ~
-codex plugin add infinite-canvas@personal
+codex plugin add vozeb-canvas@personal
 ```
 
 安装后建议开启一个新的 Codex 对话，让新的 skill 和 MCP 工具完整加载。
 
 ### 本仓库开发调试
 
-如果你就在 Infinite Canvas 仓库中调试插件，可以直接添加仓库自带 marketplace。建议使用仓库绝对路径，避免 Codex 从其他工作目录解析失败：
+如果你就在 VOZEB 仓库中调试插件，可以直接添加仓库自带 marketplace。建议使用仓库绝对路径，避免 Codex 从其他工作目录解析失败：
 
 ```bash
-cd /path/to/infinite-canvas
+cd /path/to/vozeb
 codex plugin marketplace add "$(pwd)"
-codex plugin add infinite-canvas@infinite-canvas-local
+codex plugin add vozeb-canvas@vozeb-canvas-local
 ```
 
 ## 使用
 
-1. 新建 Codex 线程后说“打开 Infinite Canvas”。
-2. 插件会确认当前仓库的本地画布服务是否已运行；端口被占用时会检查进程归属，不会把其他项目的 `3000` 当作 Infinite Canvas。
+1. 新建 Codex 线程后说“打开 VOZEB Canvas”。
+2. 插件会确认当前仓库的本地画布服务是否已运行；端口被占用时会检查进程归属，不会把其他项目的 `3000` 当作 VOZEB Canvas。
 3. 确认或启动后，插件会直接打开新建画布 URL，并自动尝试连接本地 Agent。
 4. 画布打开后，让 Codex 读取或操作当前画布。
 
 常用提示：
 
 ```text
-打开 Infinite Canvas
+打开 VOZEB Canvas
 读取当前画布并总结节点结构
 根据选中节点创建一组生图提示词
 ```
