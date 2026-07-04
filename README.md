@@ -12,6 +12,10 @@
   <a href="https://nextjs.org/"><img src="https://img.shields.io/badge/Next.js-16.2-000000?style=flat-square&logo=nextdotjs" alt="Next.js"></a>
 </p>
 
+<p align="center">
+  演示站：<a href="https://www.vozeb.com">www.vozeb.com</a>
+</p>
+
 VOZEB 是一款面向 AI 图片创作、素材管理和视觉方案迭代的开源工作台。它把无限画布、AI 生成、参考图编辑、提示词库、素材沉淀、用户权限、管理员配置和本地 Agent 能力放到同一个工作流里，适合个人创作者、本地部署场景和小团队内部使用。
 
 VOZEB 当前版本为 `v0.7.0`，这是基于原开源项目 [basketikun/infinite-canvas](https://github.com/basketikun/infinite-canvas) 继续开发的二开版本。感谢原创作者 basketikun 对无限画布、AI 创作工作流、Canvas Agent 和 Codex 插件能力的开源贡献。
