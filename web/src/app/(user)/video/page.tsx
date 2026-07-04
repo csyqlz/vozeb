@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, LoaderCircle, Music2, Plus, SlidersHorizontal, Sparkles, Trash2, Upload, VideoIcon } from "lucide-react";
+import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, LoaderCircle, Music2, PenLine, Plus, SlidersHorizontal, Sparkles, Trash2, Upload, VideoIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { App, Button, Checkbox, Drawer, Empty, Input, Modal, Tag, Typography } from "antd";
 import localforage from "localforage";
@@ -62,6 +62,7 @@ type GenerationLog = {
     task?: VideoGenerationTask;
     video?: GeneratedVideo;
     error?: string;
+    resultDeleted?: boolean;
 };
 
 type GenerationLogConfig = Pick<AiConfig, "model" | "videoModel" | "size" | "vquality" | "videoSeconds" | "videoGenerateAudio" | "videoWatermark">;
@@ -75,6 +76,9 @@ export default function VideoPage() {
     const { message } = App.useApp();
     const fileInputRef = useRef<HTMLInputElement>(null);
     const activeLogIdsRef = useRef<Set<string>>(new Set());
+    const activeLogIdRef = useRef<string | null>(null);
+    const logsRef = useRef<GenerationLog[]>([]);
+    const deletedResultLogIdsRef = useRef(new Set<string>());
     const config = useConfigStore((state) => state.config);
     const effectiveConfig = useEffectiveConfig();
     const updateConfig = useConfigStore((state) => state.updateConfig);
@@ -95,6 +99,7 @@ export default function VideoPage() {
     const [startedAt, setStartedAt] = useState(0);
     const [elapsedMs, setElapsedMs] = useState(0);
     const [selectedLogIds, setSelectedLogIds] = useState<string[]>([]);
+    const [selectedResultIds, setSelectedResultIds] = useState<string[]>([]);
     const [previewLog, setPreviewLog] = useState<GenerationLog | null>(null);
     const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
@@ -175,30 +180,35 @@ export default function VideoPage() {
         setElapsedMs(0);
         setRunning(true);
         setPreviewLog(null);
+        setSelectedResultIds([]);
         setResults([{ id: nanoid(), status: "pending" }]);
         const batchStartedAt = performance.now();
         setStartedAt(batchStartedAt);
         try {
             const task = await createVideoGenerationTask(snapshot.config, snapshot.text, snapshot.references, snapshot.videoReferences, snapshot.audioReferences);
             const log = buildLog({ prompt: snapshot.text, model, config: snapshot.config, references: snapshot.references, videoReferences: snapshot.videoReferences, audioReferences: snapshot.audioReferences, durationMs: 0, status: "生成中", task });
+            activeLogIdRef.current = log.id;
+            setPreviewLog(log);
+            setResults([{ id: log.id, status: "pending" }]);
             await saveLog(log);
             void pollGenerationLog(log, snapshot.config);
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : "生成失败";
-            setResults([{ id: nanoid(), status: "failed", error: errorMessage }]);
-            await saveLog(
-                buildLog({
-                    prompt: snapshot.text,
-                    model,
-                    config: snapshot.config,
-                    references: snapshot.references,
-                    videoReferences: snapshot.videoReferences,
-                    audioReferences: snapshot.audioReferences,
-                    durationMs: performance.now() - batchStartedAt,
-                    status: "失败",
-                    error: errorMessage,
-                }),
-            );
+            const failedLog = buildLog({
+                prompt: snapshot.text,
+                model,
+                config: snapshot.config,
+                references: snapshot.references,
+                videoReferences: snapshot.videoReferences,
+                audioReferences: snapshot.audioReferences,
+                durationMs: performance.now() - batchStartedAt,
+                status: "失败",
+                error: errorMessage,
+            });
+            activeLogIdRef.current = failedLog.id;
+            setPreviewLog(failedLog);
+            setResults([{ id: failedLog.id, status: "failed", error: errorMessage }]);
+            await saveLog(failedLog);
             message.error(errorMessage);
             setRunning(false);
         }
@@ -265,7 +275,9 @@ export default function VideoPage() {
         setElapsedMs(0);
         setStartedAt(0);
         setSelectedLogIds([]);
+        setSelectedResultIds([]);
         setPreviewLog(null);
+        activeLogIdRef.current = null;
     };
 
     const deleteSelectedLogs = () => {
@@ -277,22 +289,33 @@ export default function VideoPage() {
         if (previewLog && selectedLogIds.includes(previewLog.id)) {
             setPreviewLog(null);
             setResults([]);
+            setSelectedResultIds([]);
+            activeLogIdRef.current = null;
         }
         setSelectedLogIds([]);
         setDeleteConfirmOpen(false);
     };
 
     const saveLog = async (log: GenerationLog) => {
+        const nextLogs = [log, ...logsRef.current.filter((item) => item.id !== log.id)].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        logsRef.current = nextLogs;
+        setLogs(nextLogs);
+        if (activeLogIdRef.current === log.id) setPreviewLog(log);
         await logStore.setItem(log.id, serializeLog(log));
         await refreshLogs();
     };
 
     const refreshLogs = async () => {
         const nextLogs = await readStoredLogs();
+        logsRef.current = nextLogs;
         setLogs(nextLogs);
+        const activeLog = activeLogIdRef.current ? nextLogs.find((log) => log.id === activeLogIdRef.current) : null;
+        if (activeLog) setPreviewLog(activeLog);
         resumePendingLogs(nextLogs);
         return nextLogs;
     };
+
+    const getLatestLog = (logId: string) => logsRef.current.find((log) => log.id === logId) || null;
 
     const resumePendingLogs = (items: GenerationLog[]) => {
         for (const log of items) {
@@ -305,13 +328,23 @@ export default function VideoPage() {
         activeLogIdsRef.current.add(log.id);
         setRunning(true);
         setStartedAt((value) => value || performance.now());
-        setResults((value) => (value.length ? value : [{ id: log.id, status: "pending" }]));
+        if (!activeLogIdRef.current) activeLogIdRef.current = log.id;
+        if (activeLogIdRef.current === log.id) {
+            setPreviewLog(log);
+            setResults((value) => (value.length ? value : [{ id: log.id, status: "pending" }]));
+        }
         const taskConfig = buildVideoConfig({ ...effectiveConfig, ...log.config }, log.task.model || log.model);
         try {
             for (let attempt = 0; attempt < 120; attempt += 1) {
+                if (deletedResultLogIdsRef.current.has(log.id)) return;
                 const state = await pollVideoGenerationTask(configOverride || taskConfig, log.task);
                 if (state.status === "completed") {
+                    if (deletedResultLogIdsRef.current.has(log.id)) return;
                     const stored = await storeGeneratedVideo(state.result);
+                    if (deletedResultLogIdsRef.current.has(log.id)) {
+                        await deleteStoredMedia([stored.storageKey]);
+                        return;
+                    }
                     const nextVideo: GeneratedVideo = {
                         id: nanoid(),
                         url: stored.url,
@@ -322,8 +355,9 @@ export default function VideoPage() {
                         bytes: stored.bytes,
                         mimeType: stored.mimeType,
                     };
-                    setResults([{ id: nextVideo.id, status: "success", video: nextVideo }]);
-                    await saveLog({ ...log, status: "成功", durationMs: nextVideo.durationMs, video: nextVideo, error: undefined });
+                    const nextLog = { ...(getLatestLog(log.id) || log), status: "成功" as const, durationMs: nextVideo.durationMs, video: nextVideo, task: undefined, error: undefined, resultDeleted: false };
+                    if (activeLogIdRef.current === log.id) setResults([{ id: nextVideo.id, status: "success", video: nextVideo }]);
+                    await saveLog(nextLog);
                     message.success("视频已生成");
                     return;
                 }
@@ -332,9 +366,11 @@ export default function VideoPage() {
                 await delay(log.task.provider === "seedance" ? 5000 : 2500);
             }
         } catch (error) {
+            if (deletedResultLogIdsRef.current.has(log.id)) return;
             const errorMessage = error instanceof Error ? error.message : "生成失败";
-            setResults([{ id: log.id, status: "failed", error: errorMessage }]);
-            await saveLog({ ...log, status: "失败", durationMs: Date.now() - log.createdAt, error: errorMessage });
+            const nextLog = { ...(getLatestLog(log.id) || log), status: "失败" as const, durationMs: Date.now() - log.createdAt, task: undefined, error: errorMessage, resultDeleted: false };
+            if (activeLogIdRef.current === log.id) setResults([{ id: log.id, status: "failed", error: errorMessage }]);
+            await saveLog(nextLog);
             message.error(errorMessage);
         } finally {
             activeLogIdsRef.current.delete(log.id);
@@ -346,8 +382,10 @@ export default function VideoPage() {
     };
 
     const previewGenerationLog = (log: GenerationLog) => {
+        activeLogIdRef.current = log.id;
         setPreviewLog(log);
         setLogsOpen(false);
+        setSelectedResultIds([]);
         setPrompt(log.prompt);
         setReferences(log.references || []);
         setVideoReferences(log.videoReferences || []);
@@ -358,7 +396,57 @@ export default function VideoPage() {
         if (log.config.videoSeconds) updateConfig("videoSeconds", log.config.videoSeconds);
         if (log.config.videoGenerateAudio) updateConfig("videoGenerateAudio", log.config.videoGenerateAudio);
         if (log.config.videoWatermark) updateConfig("videoWatermark", log.config.videoWatermark);
-        setResults(log.status === "生成中" ? [{ id: log.id, status: "pending" }] : log.video ? [{ id: log.video.id, status: "success", video: log.video }] : [{ id: log.id, status: "failed", error: log.error || "生成失败" }]);
+        setResults(resultsFromLog(log));
+    };
+
+    const currentResultIds = results.map((result) => result.id);
+    const selectedVisibleResultIds = selectedResultIds.filter((id) => currentResultIds.includes(id));
+    const allResultsSelected = Boolean(results.length) && selectedVisibleResultIds.length === results.length;
+
+    const toggleAllResults = () => {
+        setSelectedResultIds(allResultsSelected ? [] : currentResultIds);
+    };
+
+    const toggleResultSelected = (id: string, checked: boolean) => {
+        setSelectedResultIds((value) => (checked ? Array.from(new Set([...value, id])) : value.filter((item) => item !== id)));
+    };
+
+    const deleteSelectedResults = async () => {
+        const currentLog = previewLog ? getLatestLog(previewLog.id) || previewLog : null;
+        if (!currentLog || !selectedVisibleResultIds.length) return;
+        const selectedIds = new Set(selectedVisibleResultIds);
+        const removedResults = results.filter((result) => selectedIds.has(result.id));
+        const nextResults = results.filter((result) => !selectedIds.has(result.id));
+        const mediaKeys = removedResults.flatMap((result) => (result.video?.storageKey ? [result.video.storageKey] : []));
+        deletedResultLogIdsRef.current.add(currentLog.id);
+        activeLogIdsRef.current.delete(currentLog.id);
+        const keptVideo = nextResults.find((result) => result.status === "success" && result.video)?.video;
+        const failedResult = nextResults.find((result) => result.status === "failed");
+        const pendingResult = nextResults.find((result) => result.status === "pending");
+        const nextLog: GenerationLog = {
+            ...currentLog,
+            status: pendingResult ? "生成中" : keptVideo ? "成功" : failedResult ? "失败" : currentLog.status === "生成中" ? "失败" : currentLog.status,
+            task: pendingResult ? currentLog.task : undefined,
+            video: keptVideo,
+            error: failedResult?.error,
+            resultDeleted: !nextResults.length,
+        };
+        setResults(nextResults);
+        setSelectedResultIds([]);
+        setPreviewLog(nextLog);
+        if (!activeLogIdsRef.current.size) {
+            setRunning(false);
+            setStartedAt(0);
+        }
+        await Promise.all([deleteStoredMedia(mediaKeys), saveLog(nextLog)]);
+        message.success(`已删除 ${removedResults.length} 个结果`);
+    };
+
+    const renameGenerationLog = async (log: GenerationLog, title: string) => {
+        const nextTitle = title.trim();
+        if (!nextTitle || nextTitle === log.title) return;
+        const latestLog = getLatestLog(log.id) || log;
+        await saveLog({ ...latestLog, title: nextTitle });
     };
 
     return (
@@ -373,6 +461,7 @@ export default function VideoPage() {
                         onCreateSession={createSession}
                         onDeleteSelected={() => setDeleteConfirmOpen(true)}
                         onPreviewLog={previewGenerationLog}
+                        onRenameLog={(log, title) => void renameGenerationLog(log, title)}
                     />
                 </aside>
 
@@ -526,17 +615,29 @@ export default function VideoPage() {
                     <div className="thin-scrollbar rounded-lg border border-stone-200 bg-card p-4 shadow-sm dark:border-stone-800 lg:min-h-0 lg:overflow-y-auto lg:p-5">
                         <div className="mb-4 flex items-center justify-between gap-3">
                             <h2 className="text-xl font-semibold">生成结果</h2>
-                            {running ? <Tag className="m-0 px-2 py-1">等待 {formatDuration(elapsedMs)}</Tag> : null}
+                            <div className="flex flex-wrap items-center justify-end gap-2">
+                                {results.length ? (
+                                    <>
+                                        <Button size="small" icon={<CheckSquare className="size-3.5" />} onClick={toggleAllResults}>
+                                            {allResultsSelected ? "取消" : "全选"}
+                                        </Button>
+                                        <Button size="small" danger icon={<Trash2 className="size-3.5" />} disabled={!selectedVisibleResultIds.length} onClick={() => void deleteSelectedResults()}>
+                                            删除{selectedVisibleResultIds.length ? ` ${selectedVisibleResultIds.length}` : ""}
+                                        </Button>
+                                    </>
+                                ) : null}
+                                {running ? <Tag className="m-0 px-2 py-1">等待 {formatDuration(elapsedMs)}</Tag> : null}
+                            </div>
                         </div>
                         {results.length ? (
-                            <div className="grid gap-4">
+                            <div className="grid max-w-[560px] gap-4">
                                 {results.map((result) =>
                                     result.status === "success" && result.video ? (
-                                        <ResultVideoCard key={result.id} video={result.video} onDownload={downloadVideo} onSaveAsset={saveResultToAssets} />
+                                        <ResultVideoCard key={result.id} video={result.video} selected={selectedResultIds.includes(result.id)} onSelectedChange={(checked) => toggleResultSelected(result.id, checked)} onDownload={downloadVideo} onSaveAsset={saveResultToAssets} />
                                     ) : result.status === "failed" ? (
-                                        <FailedVideoCard key={result.id} error={result.error || "生成失败"} onRetry={retryResult} />
+                                        <FailedVideoCard key={result.id} error={result.error || "生成失败"} selected={selectedResultIds.includes(result.id)} onSelectedChange={(checked) => toggleResultSelected(result.id, checked)} onRetry={retryResult} />
                                     ) : (
-                                        <PendingVideoCard key={result.id} />
+                                        <PendingVideoCard key={result.id} selected={selectedResultIds.includes(result.id)} onSelectedChange={(checked) => toggleResultSelected(result.id, checked)} />
                                     ),
                                 )}
                             </div>
@@ -569,6 +670,7 @@ export default function VideoPage() {
                     onCreateSession={createSession}
                     onDeleteSelected={() => setDeleteConfirmOpen(true)}
                     onPreviewLog={previewGenerationLog}
+                    onRenameLog={(log, title) => void renameGenerationLog(log, title)}
                 />
             </Drawer>
             <Drawer title="参数" placement="bottom" size="82vh" open={settingsOpen} onClose={() => setSettingsOpen(false)}>
@@ -601,9 +703,10 @@ function GenerationSettings({ config, model, updateConfig, openConfigDialog }: {
     );
 }
 
-function ResultVideoCard({ video, onDownload, onSaveAsset }: { video: GeneratedVideo; onDownload: (video: GeneratedVideo) => void; onSaveAsset: (video: GeneratedVideo) => void }) {
+function ResultVideoCard({ video, selected, onSelectedChange, onDownload, onSaveAsset }: { video: GeneratedVideo; selected?: boolean; onSelectedChange?: (checked: boolean) => void; onDownload: (video: GeneratedVideo) => void; onSaveAsset: (video: GeneratedVideo) => void }) {
     return (
-        <div className="overflow-hidden rounded-lg border border-stone-200 bg-background dark:border-stone-800">
+        <div className="relative overflow-hidden rounded-lg border border-stone-200 bg-background dark:border-stone-800">
+            <ResultSelectCheckbox selected={selected} onSelectedChange={onSelectedChange} />
             <video src={video.url} controls className="aspect-video w-full bg-black object-contain" />
             <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-stone-200 px-3 py-2.5 dark:border-stone-800">
                 <div className="flex min-w-0 flex-wrap gap-x-2 gap-y-1 text-xs text-stone-500 dark:text-stone-400">
@@ -626,9 +729,10 @@ function ResultVideoCard({ video, onDownload, onSaveAsset }: { video: GeneratedV
     );
 }
 
-function PendingVideoCard() {
+function PendingVideoCard({ selected, onSelectedChange }: { selected?: boolean; onSelectedChange?: (checked: boolean) => void }) {
     return (
         <div className="relative aspect-video overflow-hidden rounded-lg border border-dashed border-stone-300 bg-stone-50 dark:border-stone-700 dark:bg-stone-900">
+            <ResultSelectCheckbox selected={selected} onSelectedChange={onSelectedChange} />
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-stone-500 dark:text-stone-400">
                 <LoaderCircle className="size-6 animate-spin" />
                 <span>生成中</span>
@@ -637,9 +741,10 @@ function PendingVideoCard() {
     );
 }
 
-function FailedVideoCard({ error, onRetry }: { error: string; onRetry: () => void }) {
+function FailedVideoCard({ error, selected, onSelectedChange, onRetry }: { error: string; selected?: boolean; onSelectedChange?: (checked: boolean) => void; onRetry: () => void }) {
     return (
-        <div className="overflow-hidden rounded-lg border border-red-200 bg-red-50 dark:border-red-950 dark:bg-red-950/20">
+        <div className="relative overflow-hidden rounded-lg border border-red-200 bg-red-50 dark:border-red-950 dark:bg-red-950/20">
+            <ResultSelectCheckbox selected={selected} onSelectedChange={onSelectedChange} />
             <div className="flex aspect-video flex-col items-center justify-center gap-3 p-5 text-center">
                 <div className="text-sm font-medium text-red-600 dark:text-red-300">生成失败</div>
                 <Typography.Paragraph ellipsis={{ rows: 4 }} className="!mb-0 !text-xs !text-red-500 dark:!text-red-300">
@@ -655,6 +760,19 @@ function FailedVideoCard({ error, onRetry }: { error: string; onRetry: () => voi
     );
 }
 
+function ResultSelectCheckbox({ selected, onSelectedChange }: { selected?: boolean; onSelectedChange?: (checked: boolean) => void }) {
+    if (!onSelectedChange) return null;
+    return (
+        <Checkbox
+            aria-label="选择生成结果"
+            className="absolute left-2 top-2 z-10 rounded bg-white/90 px-1 py-0.5 shadow-sm dark:bg-black/60"
+            checked={selected}
+            onClick={(event) => event.stopPropagation()}
+            onChange={(event) => onSelectedChange(event.target.checked)}
+        />
+    );
+}
+
 function LogPanel({
     logs,
     selectedLogIds,
@@ -663,6 +781,7 @@ function LogPanel({
     onCreateSession,
     onDeleteSelected,
     onPreviewLog,
+    onRenameLog,
 }: {
     logs: GenerationLog[];
     selectedLogIds: string[];
@@ -671,6 +790,7 @@ function LogPanel({
     onCreateSession: () => void;
     onDeleteSelected: () => void;
     onPreviewLog: (log: GenerationLog) => void;
+    onRenameLog: (log: GenerationLog, title: string) => void;
 }) {
     const allSelected = Boolean(logs.length) && selectedLogIds.length === logs.length;
     const toggleAll = () => onSelectedLogIdsChange(allSelected ? [] : logs.map((log) => log.id));
@@ -701,6 +821,7 @@ function LogPanel({
                         active={activeLogId === log.id}
                         onSelectedChange={(checked) => onSelectedLogIdsChange(checked ? [...selectedLogIds, log.id] : selectedLogIds.filter((id) => id !== log.id))}
                         onClick={() => onPreviewLog(log)}
+                        onRename={(title) => onRenameLog(log, title)}
                     />
                 ))}
                 {!logs.length ? <div className="flex min-h-48 items-center justify-center rounded-lg border border-dashed border-stone-300 text-center text-sm text-stone-500 dark:border-stone-700">暂无生成记录</div> : null}
@@ -709,17 +830,75 @@ function LogPanel({
     );
 }
 
-function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: GenerationLog; selected: boolean; active: boolean; onSelectedChange: (checked: boolean) => void; onClick: () => void }) {
+function LogCard({ log, selected, active, onSelectedChange, onClick, onRename }: { log: GenerationLog; selected: boolean; active: boolean; onSelectedChange: (checked: boolean) => void; onClick: () => void; onRename: (title: string) => void }) {
+    const [editingTitle, setEditingTitle] = useState(false);
+    const [draftTitle, setDraftTitle] = useState(log.title);
+
+    useEffect(() => {
+        if (!editingTitle) setDraftTitle(log.title);
+    }, [editingTitle, log.title]);
+
+    const commitTitle = () => {
+        const nextTitle = draftTitle.trim();
+        setEditingTitle(false);
+        if (!nextTitle) {
+            setDraftTitle(log.title);
+            return;
+        }
+        if (nextTitle !== log.title) onRename(nextTitle);
+    };
+
     return (
-        <button
-            type="button"
+        <div
+            role="button"
+            tabIndex={0}
             className={`block w-full rounded-lg border p-2 text-left transition ${active ? "border-stone-900 bg-blue-50 dark:border-stone-100 dark:bg-blue-950/20" : "border-stone-200 bg-background hover:bg-stone-50 dark:border-stone-800 dark:hover:bg-stone-900"}`}
             onClick={onClick}
+            onKeyDown={(event) => {
+                if (event.key !== "Enter" && event.key !== " ") return;
+                event.preventDefault();
+                onClick();
+            }}
         >
             <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-2">
                 <Checkbox className="mt-0.5" checked={selected} onClick={(event) => event.stopPropagation()} onChange={(event) => onSelectedChange(event.target.checked)} />
                 <div className="min-w-0">
-                    <div className="truncate text-sm font-semibold leading-5">{log.title}</div>
+                    {editingTitle ? (
+                        <Input
+                            size="small"
+                            autoFocus
+                            value={draftTitle}
+                            onClick={(event) => event.stopPropagation()}
+                            onChange={(event) => setDraftTitle(event.target.value)}
+                            onBlur={commitTitle}
+                            onPressEnter={commitTitle}
+                            onKeyDown={(event) => {
+                                event.stopPropagation();
+                                if (event.key === "Escape") {
+                                    setDraftTitle(log.title);
+                                    setEditingTitle(false);
+                                }
+                            }}
+                        />
+                    ) : (
+                        <div className="flex min-w-0 items-center gap-1">
+                            <div className="truncate text-sm font-semibold leading-5" title={log.title}>
+                                {log.title}
+                            </div>
+                            <Button
+                                aria-label="编辑记录标题"
+                                type="text"
+                                size="small"
+                                className="!h-6 !w-6 !min-w-6 shrink-0 !p-0"
+                                icon={<PenLine className="size-3.5" />}
+                                onClick={(event) => {
+                                    event.stopPropagation();
+                                    setDraftTitle(log.title);
+                                    setEditingTitle(true);
+                                }}
+                            />
+                        </div>
+                    )}
                     <div className="mt-2 flex flex-wrap gap-1">
                         <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none">{log.size}</Tag>
                         <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none">{log.resolution}p</Tag>
@@ -735,7 +914,7 @@ function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: Ge
                     </Tag>
                 </div>
             </div>
-        </button>
+        </div>
     );
 }
 
@@ -798,6 +977,7 @@ async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog>
         task: log.task,
         video,
         error: log.error,
+        resultDeleted: Boolean(log.resultDeleted),
     };
 }
 
@@ -809,6 +989,14 @@ function serializeLog(log: GenerationLog): GenerationLog {
         audioReferences: log.audioReferences.map((item) => (item.storageKey ? { ...item, url: "" } : item)),
         video: log.video?.storageKey ? { ...log.video, url: "" } : log.video,
     };
+}
+
+function resultsFromLog(log: GenerationLog): GenerationResult[] {
+    if (log.resultDeleted) return [];
+    if (log.status === "生成中" && log.task) return [{ id: log.id, status: "pending" }];
+    if (log.video) return [{ id: log.video.id, status: "success", video: log.video }];
+    if (log.error) return [{ id: log.id, status: "failed", error: log.error }];
+    return [];
 }
 
 function isSupportedAudioFile(file: File) {
@@ -847,8 +1035,8 @@ function ReferenceOrderButtons({ index, total, onMove }: { index: number; total:
     if (total <= 1) return null;
     return (
         <div className="absolute inset-x-1 bottom-1 flex justify-between">
-            <Button size="small" className="!h-6 !w-6 !min-w-6 !rounded-full !bg-white/85 !p-0 !shadow-sm" icon={<ArrowLeft className="size-3" />} disabled={index <= 0} onClick={() => onMove(-1)} />
-            <Button size="small" className="!h-6 !w-6 !min-w-6 !rounded-full !bg-white/85 !p-0 !shadow-sm" icon={<ArrowRight className="size-3" />} disabled={index >= total - 1} onClick={() => onMove(1)} />
+            <Button size="small" className="!h-6 !w-6 !min-w-6 !rounded-full !bg-white/85 !p-0 !text-stone-900 !shadow-sm disabled:!text-stone-400 dark:!text-stone-900" icon={<ArrowLeft className="size-3" />} disabled={index <= 0} onClick={() => onMove(-1)} />
+            <Button size="small" className="!h-6 !w-6 !min-w-6 !rounded-full !bg-white/85 !p-0 !text-stone-900 !shadow-sm disabled:!text-stone-400 dark:!text-stone-900" icon={<ArrowRight className="size-3" />} disabled={index >= total - 1} onClick={() => onMove(1)} />
         </div>
     );
 }

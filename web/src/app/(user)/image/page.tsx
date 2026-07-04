@@ -112,6 +112,7 @@ export default function ImagePage() {
     const [startedAt, setStartedAt] = useState(0);
     const [elapsedMs, setElapsedMs] = useState(0);
     const [selectedLogIds, setSelectedLogIds] = useState<string[]>([]);
+    const [selectedResultIds, setSelectedResultIds] = useState<string[]>([]);
     const [previewLog, setPreviewLog] = useState<GenerationLog | null>(null);
     const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
     const [runningLogId, setRunningLogId] = useState<string | null>(null);
@@ -120,6 +121,7 @@ export default function ImagePage() {
     const activeLogIdRef = useRef<string | null>(null);
     const taskControllersRef = useRef(new Map<string, AbortController>());
     const logWriteQueuesRef = useRef(new Map<string, Promise<unknown>>());
+    const deletedResultIdsRef = useRef(new Set<string>());
 
     const model = effectiveConfig.imageModel || effectiveConfig.model;
     const canGenerate = Boolean(prompt.trim());
@@ -228,6 +230,7 @@ export default function ImagePage() {
     function patchLogResult(logId: string, resultId: string, patch: Partial<GenerationResult>, snapshot: GenerationSnapshot, durationMs: number, fallbackIndex = 0) {
         const log = getLatestLog(logId);
         if (!log) return [];
+        if (deletedResultIdsRef.current.has(`${logId}:${resultId}`)) return getLogResults(log);
         const currentResults = getLogResults(log);
         let matched = false;
         const nextResults = currentResults.map((item) => {
@@ -335,6 +338,7 @@ export default function ImagePage() {
         setRunning(true);
         setRunningLogId(logId);
         setStartedAt(batchStartedAt);
+        setSelectedResultIds([]);
         activeLogIdRef.current = logId;
         setPreviewLog(pendingLog);
         setLogResults(logId, startedResults);
@@ -399,6 +403,7 @@ export default function ImagePage() {
         setElapsedMs(0);
         setStartedAt(0);
         setSelectedLogIds([]);
+        setSelectedResultIds([]);
         setPreviewLog(null);
         activeLogIdRef.current = null;
     };
@@ -410,6 +415,7 @@ export default function ImagePage() {
         if (previewLog && selectedLogIds.includes(previewLog.id)) {
             setPreviewLog(null);
             setResults([]);
+            setSelectedResultIds([]);
             activeLogIdRef.current = null;
         }
         setSelectedLogIds([]);
@@ -425,6 +431,7 @@ export default function ImagePage() {
         setLogsOpen(false);
         setPrompt(currentLog.prompt);
         setReferences(currentLog.references || []);
+        setSelectedResultIds([]);
         if (currentLog.config.imageModel || currentLog.model) updateConfig("imageModel", currentLog.config.imageModel || currentLog.model);
         if (currentLog.config.quality) updateConfig("quality", currentLog.config.quality);
         if (currentLog.config.size) updateConfig("size", currentLog.config.size);
@@ -484,6 +491,48 @@ export default function ImagePage() {
             });
     };
 
+    const currentResultIds = results.map((result) => result.id);
+    const selectedVisibleResultIds = selectedResultIds.filter((id) => currentResultIds.includes(id));
+    const allResultsSelected = Boolean(results.length) && selectedVisibleResultIds.length === results.length;
+
+    const toggleAllResults = () => {
+        setSelectedResultIds(allResultsSelected ? [] : currentResultIds);
+    };
+
+    const toggleResultSelected = (id: string, checked: boolean) => {
+        setSelectedResultIds((value) => (checked ? Array.from(new Set([...value, id])) : value.filter((item) => item !== id)));
+    };
+
+    const deleteSelectedResults = async () => {
+        const currentLog = previewLog ? getLatestLog(previewLog.id) || previewLog : null;
+        if (!currentLog || !selectedVisibleResultIds.length) return;
+        const selectedIds = new Set(selectedVisibleResultIds);
+        const currentResults = getLogResults(currentLog);
+        const removedResults = currentResults.filter((result) => selectedIds.has(result.id));
+        const nextResults = currentResults.filter((result) => !selectedIds.has(result.id));
+        const storageKeys = removedResults.flatMap((result) => (result.image?.storageKey ? [result.image.storageKey] : []));
+        removedResults.forEach((result) => {
+            deletedResultIdsRef.current.add(`${currentLog.id}:${result.id}`);
+            if (!result.task) return;
+            const controllerKey = `${currentLog.id}:${result.id}:${result.task.taskId}`;
+            taskControllersRef.current.get(controllerKey)?.abort();
+            taskControllersRef.current.delete(controllerKey);
+        });
+        const snapshot = snapshotFromLog(currentLog, effectiveConfig);
+        const nextLog = buildLogFromResults(currentLog, snapshot, nextResults, currentLog.durationMs || 0, String(nextResults.length));
+        setLogResults(currentLog.id, nextResults);
+        setSelectedResultIds([]);
+        await Promise.all([deleteStoredImages(storageKeys), saveLog(nextLog)]);
+        message.success(`已删除 ${removedResults.length} 个结果`);
+    };
+
+    const renameGenerationLog = async (log: GenerationLog, title: string) => {
+        const nextTitle = title.trim();
+        if (!nextTitle || nextTitle === log.title) return;
+        const latestLog = getLatestLog(log.id) || log;
+        await saveLog({ ...latestLog, title: nextTitle });
+    };
+
     return (
         <div className="flex h-full flex-col overflow-hidden bg-stone-50 text-stone-900 dark:bg-stone-950 dark:text-stone-100">
             <main className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto p-3 lg:grid-cols-[300px_minmax(0,1fr)] lg:overflow-hidden xl:grid-cols-[320px_minmax(0,1fr)]">
@@ -496,6 +545,7 @@ export default function ImagePage() {
                         onCreateSession={createSession}
                         onDeleteSelected={() => setDeleteConfirmOpen(true)}
                         onPreviewLog={(log) => void previewGenerationLog(log)}
+                        onRenameLog={(log, title) => void renameGenerationLog(log, title)}
                     />
                 </aside>
 
@@ -604,17 +654,29 @@ export default function ImagePage() {
                             <div>
                                 <h2 className="text-xl font-semibold">生成结果</h2>
                             </div>
-                            {running && runningLogId === previewLog?.id ? <Tag className="m-0 px-2 py-1">等待 {formatDuration(elapsedMs)}</Tag> : null}
+                            <div className="flex flex-wrap items-center justify-end gap-2">
+                                {results.length ? (
+                                    <>
+                                        <Button size="small" icon={<CheckSquare className="size-3.5" />} onClick={toggleAllResults}>
+                                            {allResultsSelected ? "取消" : "全选"}
+                                        </Button>
+                                        <Button size="small" danger icon={<Trash2 className="size-3.5" />} disabled={!selectedVisibleResultIds.length} onClick={() => void deleteSelectedResults()}>
+                                            删除{selectedVisibleResultIds.length ? ` ${selectedVisibleResultIds.length}` : ""}
+                                        </Button>
+                                    </>
+                                ) : null}
+                                {running && runningLogId === previewLog?.id ? <Tag className="m-0 px-2 py-1">等待 {formatDuration(elapsedMs)}</Tag> : null}
+                            </div>
                         </div>
                         {results.length ? (
-                            <div className={results.length === 1 ? "grid max-w-[560px] gap-4" : "grid gap-4 sm:grid-cols-2 2xl:grid-cols-3"}>
+                            <div className={results.length === 1 ? "grid max-w-[360px] gap-4" : "grid justify-start gap-4 [grid-template-columns:repeat(auto-fill,minmax(min(100%,220px),280px))]"}>
                                 {results.map((result, index) =>
                                     result.status === "success" && result.image ? (
-                                        <ResultImageCard key={result.id} image={result.image} index={index} large={results.length === 1} onEdit={addResultToReferences} onDownload={downloadImage} onSaveAsset={saveResultToAssets} />
+                                        <ResultImageCard key={result.id} image={result.image} index={index} large={results.length === 1} selected={selectedResultIds.includes(result.id)} onSelectedChange={(checked) => toggleResultSelected(result.id, checked)} onEdit={addResultToReferences} onDownload={downloadImage} onSaveAsset={saveResultToAssets} />
                                     ) : result.status === "failed" ? (
-                                        <FailedImageCard key={result.id} error={result.error || "生成失败"} large={results.length === 1} onRetry={() => retryResult(index)} />
+                                        <FailedImageCard key={result.id} error={result.error || "生成失败"} large={results.length === 1} selected={selectedResultIds.includes(result.id)} onSelectedChange={(checked) => toggleResultSelected(result.id, checked)} onRetry={() => retryResult(index)} />
                                     ) : (
-                                        <PendingImageCard key={result.id} large={results.length === 1} />
+                                        <PendingImageCard key={result.id} large={results.length === 1} selected={selectedResultIds.includes(result.id)} onSelectedChange={(checked) => toggleResultSelected(result.id, checked)} />
                                     ),
                                 )}
                             </div>
@@ -647,6 +709,7 @@ export default function ImagePage() {
                     onCreateSession={createSession}
                     onDeleteSelected={() => setDeleteConfirmOpen(true)}
                     onPreviewLog={(log) => void previewGenerationLog(log)}
+                    onRenameLog={(log, title) => void renameGenerationLog(log, title)}
                 />
             </Drawer>
             <Drawer title="参数" placement="bottom" size="82vh" open={settingsOpen} onClose={() => setSettingsOpen(false)}>
@@ -683,6 +746,8 @@ function ResultImageCard({
     image,
     index,
     large,
+    selected,
+    onSelectedChange,
     onEdit,
     onDownload,
     onSaveAsset,
@@ -690,13 +755,18 @@ function ResultImageCard({
     image: GeneratedImage;
     index: number;
     large?: boolean;
+    selected?: boolean;
+    onSelectedChange?: (checked: boolean) => void;
     onEdit: (image: GeneratedImage, index: number) => void;
     onDownload: (image: GeneratedImage, index: number) => void;
     onSaveAsset: (image: GeneratedImage, index: number) => void;
 }) {
     return (
-        <div className="overflow-hidden rounded-lg border border-stone-200 bg-background dark:border-stone-800">
-            <Image src={image.dataUrl} alt={`生成结果 ${index + 1}`} className={large ? "max-h-[560px] min-h-[320px] w-full bg-stone-50 object-contain dark:bg-stone-950" : "aspect-square w-full object-cover"} />
+        <div className="relative overflow-hidden rounded-lg border border-stone-200 bg-background dark:border-stone-800">
+            <ResultSelectCheckbox selected={selected} onSelectedChange={onSelectedChange} />
+            <div className={`${large ? "h-[240px]" : "h-[220px]"} flex w-full items-center justify-center bg-stone-50 dark:bg-stone-950`}>
+                <Image rootClassName="!h-full !w-full" src={image.dataUrl} alt={`生成结果 ${index + 1}`} className="!h-full !w-full object-contain" style={{ objectFit: "contain" }} />
+            </div>
             <div className="space-y-2 border-t border-stone-200 px-3 py-2.5 dark:border-stone-800">
                 <div className="flex min-w-0 gap-x-2 gap-y-1 text-xs text-stone-500 dark:text-stone-400">
                     <span>
@@ -727,9 +797,10 @@ function ResultImageCard({
     );
 }
 
-function PendingImageCard({ large }: { large?: boolean }) {
+function PendingImageCard({ large, selected, onSelectedChange }: { large?: boolean; selected?: boolean; onSelectedChange?: (checked: boolean) => void }) {
     return (
-        <div className={`relative overflow-hidden rounded-lg border border-dashed border-stone-300 bg-stone-50 dark:border-stone-700 dark:bg-stone-900 ${large ? "min-h-[320px]" : "aspect-square"}`}>
+        <div className={`relative overflow-hidden rounded-lg border border-dashed border-stone-300 bg-stone-50 dark:border-stone-700 dark:bg-stone-900 ${large ? "h-[240px]" : "h-[220px]"}`}>
+            <ResultSelectCheckbox selected={selected} onSelectedChange={onSelectedChange} />
             <div
                 className="absolute inset-0 opacity-60"
                 style={{
@@ -745,10 +816,11 @@ function PendingImageCard({ large }: { large?: boolean }) {
     );
 }
 
-function FailedImageCard({ error, large, onRetry }: { error: string; large?: boolean; onRetry: () => void }) {
+function FailedImageCard({ error, large, selected, onSelectedChange, onRetry }: { error: string; large?: boolean; selected?: boolean; onSelectedChange?: (checked: boolean) => void; onRetry: () => void }) {
     return (
-        <div className="overflow-hidden rounded-lg border border-red-200 bg-red-50 dark:border-red-950 dark:bg-red-950/20">
-            <div className={`flex flex-col items-center justify-center gap-3 p-5 text-center ${large ? "min-h-[320px]" : "aspect-square"}`}>
+        <div className="relative overflow-hidden rounded-lg border border-red-200 bg-red-50 dark:border-red-950 dark:bg-red-950/20">
+            <ResultSelectCheckbox selected={selected} onSelectedChange={onSelectedChange} />
+            <div className={`flex flex-col items-center justify-center gap-3 p-5 text-center ${large ? "h-[240px]" : "h-[220px]"}`}>
                 <div className="text-sm font-medium text-red-600 dark:text-red-300">生成失败</div>
                 <Typography.Paragraph ellipsis={{ rows: 4 }} className="!mb-0 !text-xs !text-red-500 dark:!text-red-300">
                     {error}
@@ -760,6 +832,19 @@ function FailedImageCard({ error, large, onRetry }: { error: string; large?: boo
                 </Button>
             </div>
         </div>
+    );
+}
+
+function ResultSelectCheckbox({ selected, onSelectedChange }: { selected?: boolean; onSelectedChange?: (checked: boolean) => void }) {
+    if (!onSelectedChange) return null;
+    return (
+        <Checkbox
+            aria-label="选择生成结果"
+            className="absolute left-2 top-2 z-10 rounded bg-white/90 px-1 py-0.5 shadow-sm dark:bg-black/60"
+            checked={selected}
+            onClick={(event) => event.stopPropagation()}
+            onChange={(event) => onSelectedChange(event.target.checked)}
+        />
     );
 }
 
@@ -775,6 +860,7 @@ function LogPanel({
     onCreateSession,
     onDeleteSelected,
     onPreviewLog,
+    onRenameLog,
 }: {
     logs: GenerationLog[];
     selectedLogIds: string[];
@@ -783,6 +869,7 @@ function LogPanel({
     onCreateSession: () => void;
     onDeleteSelected: () => void;
     onPreviewLog: (log: GenerationLog) => void;
+    onRenameLog: (log: GenerationLog, title: string) => void;
 }) {
     const allSelected = Boolean(logs.length) && selectedLogIds.length === logs.length;
     const toggleAll = () => onSelectedLogIdsChange(allSelected ? [] : logs.map((log) => log.id));
@@ -815,6 +902,7 @@ function LogPanel({
                         active={activeLogId === log.id}
                         onSelectedChange={(checked) => onSelectedLogIdsChange(checked ? [...selectedLogIds, log.id] : selectedLogIds.filter((id) => id !== log.id))}
                         onClick={() => onPreviewLog(log)}
+                        onRename={(title) => onRenameLog(log, title)}
                     />
                 ))}
                 {!logs.length ? <div className="flex min-h-48 items-center justify-center rounded-lg border border-dashed border-stone-300 text-center text-sm text-stone-500 dark:border-stone-700">暂无生成记录</div> : null}
@@ -823,20 +911,77 @@ function LogPanel({
     );
 }
 
-function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: GenerationLog; selected: boolean; active: boolean; onSelectedChange: (checked: boolean) => void; onClick: () => void }) {
+function LogCard({ log, selected, active, onSelectedChange, onClick, onRename }: { log: GenerationLog; selected: boolean; active: boolean; onSelectedChange: (checked: boolean) => void; onClick: () => void; onRename: (title: string) => void }) {
     const thumbnails = (log.thumbnails || []).filter(Boolean).slice(0, 4);
+    const [editingTitle, setEditingTitle] = useState(false);
+    const [draftTitle, setDraftTitle] = useState(log.title);
+
+    useEffect(() => {
+        if (!editingTitle) setDraftTitle(log.title);
+    }, [editingTitle, log.title]);
+
+    const commitTitle = () => {
+        const nextTitle = draftTitle.trim();
+        setEditingTitle(false);
+        if (!nextTitle) {
+            setDraftTitle(log.title);
+            return;
+        }
+        if (nextTitle !== log.title) onRename(nextTitle);
+    };
 
     return (
-        <button
-            type="button"
+        <div
+            role="button"
+            tabIndex={0}
             className={`block w-full rounded-lg border p-2 text-left transition ${active ? "border-stone-900 bg-blue-50 dark:border-stone-100 dark:bg-blue-950/20" : "border-stone-200 bg-background hover:bg-stone-50 dark:border-stone-800 dark:hover:bg-stone-900"}`}
             onClick={onClick}
+            onKeyDown={(event) => {
+                if (event.key !== "Enter" && event.key !== " ") return;
+                event.preventDefault();
+                onClick();
+            }}
         >
             <div className="grid grid-cols-[minmax(128px,1fr)_auto] gap-2">
                 <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-2">
                     <Checkbox className="mt-0.5" checked={selected} onClick={(event) => event.stopPropagation()} onChange={(event) => onSelectedChange(event.target.checked)} />
                     <div className="min-w-0">
-                        <div className="truncate text-sm font-semibold leading-5">{log.title}</div>
+                        {editingTitle ? (
+                            <Input
+                                size="small"
+                                autoFocus
+                                value={draftTitle}
+                                onClick={(event) => event.stopPropagation()}
+                                onChange={(event) => setDraftTitle(event.target.value)}
+                                onBlur={commitTitle}
+                                onPressEnter={commitTitle}
+                                onKeyDown={(event) => {
+                                    event.stopPropagation();
+                                    if (event.key === "Escape") {
+                                        setDraftTitle(log.title);
+                                        setEditingTitle(false);
+                                    }
+                                }}
+                            />
+                        ) : (
+                            <div className="flex min-w-0 items-center gap-1">
+                                <div className="truncate text-sm font-semibold leading-5" title={log.title}>
+                                    {log.title}
+                                </div>
+                                <Button
+                                    aria-label="编辑记录标题"
+                                    type="text"
+                                    size="small"
+                                    className="!h-6 !w-6 !min-w-6 shrink-0 !p-0"
+                                    icon={<PenLine className="size-3.5" />}
+                                    onClick={(event) => {
+                                        event.stopPropagation();
+                                        setDraftTitle(log.title);
+                                        setEditingTitle(true);
+                                    }}
+                                />
+                            </div>
+                        )}
                         {thumbnails.length ? (
                             <div className="mt-2 flex gap-1 overflow-hidden">
                                 {thumbnails.map((image, index) => (
@@ -873,7 +1018,7 @@ function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: Ge
                     </div>
                 </div>
             </div>
-        </button>
+        </div>
     );
 }
 
@@ -1001,8 +1146,8 @@ function ReferenceOrderButtons({ index, total, onMove }: { index: number; total:
     if (total <= 1) return null;
     return (
         <div className="absolute inset-x-1 bottom-1 flex justify-between">
-            <Button size="small" className="!h-6 !w-6 !min-w-6 !rounded-full !bg-white/85 !p-0 !shadow-sm" icon={<ArrowLeft className="size-3" />} disabled={index <= 0} onClick={() => onMove(-1)} />
-            <Button size="small" className="!h-6 !w-6 !min-w-6 !rounded-full !bg-white/85 !p-0 !shadow-sm" icon={<ArrowRight className="size-3" />} disabled={index >= total - 1} onClick={() => onMove(1)} />
+            <Button size="small" className="!h-6 !w-6 !min-w-6 !rounded-full !bg-white/85 !p-0 !text-stone-900 !shadow-sm disabled:!text-stone-400 dark:!text-stone-900" icon={<ArrowLeft className="size-3" />} disabled={index <= 0} onClick={() => onMove(-1)} />
+            <Button size="small" className="!h-6 !w-6 !min-w-6 !rounded-full !bg-white/85 !p-0 !text-stone-900 !shadow-sm disabled:!text-stone-400 dark:!text-stone-900" icon={<ArrowRight className="size-3" />} disabled={index >= total - 1} onClick={() => onMove(1)} />
         </div>
     );
 }

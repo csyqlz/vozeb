@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { App, Button, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Table, Tag } from "antd";
+import { App, Button, Checkbox, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Table, Tag } from "antd";
 import type { TableColumnsType } from "antd";
 import { Database, Download, Gift, Globe2, Image as ImageIcon, KeyRound, Mail, PlugZap, Plus, RefreshCw, Save, Search, Send, ShieldCheck, SlidersHorizontal, Trash2, Upload, UserCog, UserRound, UsersRound } from "lucide-react";
 import { nanoid } from "nanoid";
@@ -1107,19 +1107,63 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                                         </Popconfirm>
                                     </div>
                                 </div>
-                                <Table
-                                    rowKey="id"
-                                    columns={promptColumns}
-                                    dataSource={filteredPrompts}
-                                    loading={promptsLoading}
-                                    pagination={{ pageSize: 6, hideOnSinglePage: true }}
-                                    size="middle"
-                                    scroll={{ x: 760 }}
-                                    rowSelection={{
-                                        selectedRowKeys: selectedPromptIds,
-                                        onChange: (keys) => setSelectedPromptIds(keys.map(String)),
-                                    }}
-                                />
+                                <div className="space-y-3 px-4 pb-4 md:hidden">
+                                    {filteredPrompts.map((prompt) => (
+                                        <div key={prompt.id} className="rounded-lg border border-stone-200 bg-white p-3 dark:border-stone-800 dark:bg-stone-950">
+                                            <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-3">
+                                                <Checkbox checked={selectedPromptIds.includes(prompt.id)} onChange={(event) => setSelectedPromptIds((ids) => (event.target.checked ? Array.from(new Set([...ids, prompt.id])) : ids.filter((id) => id !== prompt.id)))} />
+                                                <div className="min-w-0">
+                                                    <div className="flex min-w-0 gap-3">
+                                                        {prompt.coverUrl ? (
+                                                            <img src={prompt.coverUrl} alt={prompt.title} className="h-16 w-24 shrink-0 rounded-md border border-stone-200 object-cover dark:border-stone-800" loading="lazy" referrerPolicy="no-referrer" />
+                                                        ) : (
+                                                            <div className="h-16 w-24 shrink-0 rounded-md border border-stone-200 bg-stone-100 dark:border-stone-800 dark:bg-stone-900" />
+                                                        )}
+                                                        <div className="min-w-0">
+                                                            <div className="truncate text-sm font-semibold text-stone-950 dark:text-stone-100">{prompt.title}</div>
+                                                            <div className="mt-1 line-clamp-2 text-xs leading-5 text-stone-500 dark:text-stone-400">{prompt.prompt}</div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="mt-3 flex min-w-0 flex-wrap gap-1">
+                                                        {prompt.category ? (
+                                                            <Tag className="m-0 max-w-full truncate text-[11px]" color="blue">
+                                                                {prompt.category}
+                                                            </Tag>
+                                                        ) : null}
+                                                        {prompt.tags.map((tag) => (
+                                                            <Tag key={tag} className="m-0 max-w-full truncate text-[11px]">
+                                                                {tag}
+                                                            </Tag>
+                                                        ))}
+                                                    </div>
+                                                    <div className="mt-3 flex justify-end">
+                                                        <Popconfirm title="删除公共提示词？" okText="删除" cancelText="取消" onConfirm={() => deletePrompt(prompt.id)}>
+                                                            <Button size="small" danger loading={deletingPromptId === prompt.id} icon={<Trash2 className="size-3.5" />}>
+                                                                删除
+                                                            </Button>
+                                                        </Popconfirm>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                    {!filteredPrompts.length ? <div className="rounded-lg border border-dashed border-stone-300 py-12 text-center text-sm text-stone-500 dark:border-stone-700">暂无提示词</div> : null}
+                                </div>
+                                <div className="hidden md:block">
+                                    <Table
+                                        rowKey="id"
+                                        columns={promptColumns}
+                                        dataSource={filteredPrompts}
+                                        loading={promptsLoading}
+                                        pagination={{ pageSize: 6, hideOnSinglePage: true }}
+                                        size="middle"
+                                        scroll={{ x: 760 }}
+                                        rowSelection={{
+                                            selectedRowKeys: selectedPromptIds,
+                                            onChange: (keys) => setSelectedPromptIds(keys.map(String)),
+                                        }}
+                                    />
+                                </div>
                             </section>
                         </div>
                     </Panel>

@@ -3077,7 +3077,9 @@ function CanvasTopBar({
     const colorTheme = useThemeStore((state) => state.theme);
     const theme = canvasThemes[colorTheme];
     const titleRef = useRef<HTMLDivElement>(null);
+    const menuTriggerRef = useRef<HTMLButtonElement>(null);
     const [shortcutsOpen, setShortcutsOpen] = useState(false);
+    const [menuOpen, setMenuOpen] = useState(false);
 
     useEffect(() => {
         if (!isTitleEditing) return;
@@ -3088,13 +3090,29 @@ function CanvasTopBar({
         return () => document.removeEventListener("pointerdown", close, true);
     }, [isTitleEditing, onFinishTitleEditing]);
 
+    useEffect(() => {
+        if (!menuOpen) return;
+        const close = (event: PointerEvent) => {
+            const target = event.target;
+            if (!(target instanceof Node)) return;
+            if (menuTriggerRef.current?.contains(target)) return;
+            if (target instanceof Element && target.closest(".ant-dropdown, .ant-dropdown-menu, .ant-dropdown-menu-submenu, .ant-dropdown-menu-submenu-popup")) return;
+            setMenuOpen(false);
+        };
+        document.addEventListener("pointerdown", close, true);
+        return () => document.removeEventListener("pointerdown", close, true);
+    }, [menuOpen]);
+
     return (
         <>
             <div className="canvas-topbar pointer-events-none absolute left-0 right-0 top-0 z-50 flex h-16 items-center justify-between gap-2 px-4">
                 <div className="canvas-topbar-left pointer-events-auto flex min-w-0 items-center gap-3">
                     <Dropdown
+                        open={menuOpen}
+                        onOpenChange={setMenuOpen}
                         trigger={["click"]}
                         menu={{
+                            onClick: () => setMenuOpen(false),
                             items: [
                                 { key: "home", icon: <Home className="size-4" />, label: "主页", onClick: onHome },
                                 { key: "docs", icon: <BookOpen className="size-4" />, label: "文档", onClick: () => window.open(DOCS_URL, "_blank", "noopener,noreferrer") },
@@ -3110,7 +3128,7 @@ function CanvasTopBar({
                             ],
                         }}
                     >
-                        <button type="button" className="grid size-9 place-items-center rounded-full transition hover:bg-black/5 dark:hover:bg-white/10" style={{ color: theme.node.text }} aria-label="打开画布菜单">
+                        <button ref={menuTriggerRef} type="button" className="grid size-9 place-items-center rounded-full transition hover:bg-black/5 dark:hover:bg-white/10" style={{ color: theme.node.text }} aria-label="打开画布菜单">
                             <Menu className="size-5" />
                         </button>
                     </Dropdown>
