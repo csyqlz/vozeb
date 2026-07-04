@@ -1,12 +1,12 @@
-﻿<p align="center">
-  <img src="web/public/logo.svg?v=0.7.4-white" width="108" alt="VOZEB logo">
+<p align="center">
+  <img src="web/public/logo.svg?v=0.7.6-white" width="108" alt="VOZEB logo">
 </p>
 
 <h1 align="center">VOZEB</h1>
 
 <p align="center">
   <a href="https://github.com/csyqlz/vozeb"><img src="https://img.shields.io/github/stars/csyqlz/vozeb?style=flat-square&logo=github" alt="GitHub stars"></a>
-  <a href="VERSION"><img src="https://img.shields.io/badge/version-v0.7.5-2563eb?style=flat-square" alt="Version"></a>
+  <a href="VERSION"><img src="https://img.shields.io/badge/version-v0.7.6-2563eb?style=flat-square" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-f97316?style=flat-square" alt="License"></a>
   <a href="https://vercel.com/"><img src="https://img.shields.io/badge/Vercel-ready-000000?style=flat-square&logo=vercel" alt="Vercel ready"></a>
   <a href="https://nextjs.org/"><img src="https://img.shields.io/badge/Next.js-16.2-000000?style=flat-square&logo=nextdotjs" alt="Next.js"></a>
@@ -18,7 +18,7 @@
 
 VOZEB 是一款面向 AI 图片创作、素材管理和视觉方案迭代的开源工作台。它把无限画布、AI 生成、参考图编辑、提示词库、素材沉淀、用户权限、管理员配置和本地 Agent 能力放到同一个工作流里，适合个人创作者、本地部署场景和小团队内部使用。
 
-VOZEB 当前版本为 `v0.7.5`，这是基于原创开源画布项目继续开发的二开版本。感谢原创作者 basketikun 对无限画布、AI 创作工作流、Canvas Agent 和 Codex 插件能力的开源贡献。
+VOZEB 当前版本为 `v0.7.6`，这是基于原创开源画布项目继续开发的二开版本。感谢原创作者 basketikun 对无限画布、AI 创作工作流、Canvas Agent 和 Codex 插件能力的开源贡献。
 
 版本更新记录请查看 [GitHub Releases](https://github.com/csyqlz/vozeb/releases)。
 

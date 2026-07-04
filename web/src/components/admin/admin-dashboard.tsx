@@ -1302,13 +1302,13 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                     <Panel>
                         <PanelHeader title="生成日志" description="查看所有用户通过画布、图片工作台和视频创作台产生的图片/视频生成记录。" />
                         <div className="space-y-4 p-4 sm:p-5">
-                            <div className="flex min-w-0 flex-wrap gap-3">
+                            <div className="flex min-w-0 flex-wrap gap-2.5">
                                 <Input
                                     allowClear
                                     className="min-w-0"
-                                    style={{ flex: "1 1 260px", maxWidth: 380, minWidth: 0 }}
+                                    style={{ flex: "0 1 300px", maxWidth: 300, minWidth: 220 }}
                                     prefix={<Search className="size-4 text-stone-400" />}
-                                    placeholder="搜索用户、提示词、模型或简述"
+                                    placeholder="搜索日志"
                                     value={generationLogSearch}
                                     onChange={(event) => {
                                         setGenerationLogSearch(event.target.value);
@@ -1318,7 +1318,7 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                                 <Select
                                     allowClear
                                     className="min-w-0"
-                                    style={{ flex: "1 1 120px", maxWidth: 150, minWidth: 0 }}
+                                    style={{ flex: "0 0 118px", width: 118, minWidth: 0 }}
                                     placeholder="类型"
                                     value={generationLogKind || undefined}
                                     onChange={(value) => {
@@ -1333,7 +1333,7 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                                 <Select
                                     allowClear
                                     className="min-w-0"
-                                    style={{ flex: "1 1 120px", maxWidth: 150, minWidth: 0 }}
+                                    style={{ flex: "0 0 138px", width: 138, minWidth: 0 }}
                                     placeholder="入口"
                                     value={generationLogSource || undefined}
                                     onChange={(value) => {
@@ -1349,7 +1349,7 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                                 <Select
                                     allowClear
                                     className="min-w-0"
-                                    style={{ flex: "1 1 120px", maxWidth: 150, minWidth: 0 }}
+                                    style={{ flex: "0 0 118px", width: 118, minWidth: 0 }}
                                     placeholder="状态"
                                     value={generationLogStatus || undefined}
                                     onChange={(value) => {
@@ -1365,7 +1365,7 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                                 <Select
                                     allowClear
                                     className="min-w-0"
-                                    style={{ flex: "1 1 160px", maxWidth: 220, minWidth: 0 }}
+                                    style={{ flex: "0 1 160px", maxWidth: 180, minWidth: 132 }}
                                     showSearch
                                     placeholder="用户"
                                     value={generationLogUserId || undefined}
@@ -1378,14 +1378,15 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                                 />
                                 <DatePicker.RangePicker
                                     className="min-w-0 max-w-full"
-                                    style={{ flex: "1 1 280px", maxWidth: 360, minWidth: 0 }}
+                                    style={{ flex: "0 1 236px", maxWidth: 236, minWidth: 210 }}
                                     allowClear
-                                    format="YYYY-MM-DD"
-                                    placeholder={["开始日期", "结束日期"]}
+                                    format="MM-DD"
+                                    placeholder={["开始", "结束"]}
+                                    separator="至"
                                     value={generationLogStart || generationLogEnd ? [generationLogStart ? dayjs(generationLogStart) : null, generationLogEnd ? dayjs(generationLogEnd) : null] : null}
-                                    onChange={(_, dateStrings) => {
-                                        setGenerationLogStart(dateStrings[0] || "");
-                                        setGenerationLogEnd(dateStrings[1] || "");
+                                    onChange={(dates) => {
+                                        setGenerationLogStart(dates?.[0]?.format("YYYY-MM-DD") || "");
+                                        setGenerationLogEnd(dates?.[1]?.format("YYYY-MM-DD") || "");
                                         setGenerationLogPage(1);
                                     }}
                                 />
