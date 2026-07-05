@@ -1984,8 +1984,6 @@ function GenerationLogMobileCard({
 }
 
 function GenerationLogDetail({ log, settings }: { log: StoredGenerationLog; settings: AuthSettings["generationAssetStorage"] }) {
-    const asset = log.assets[0];
-    const assetUrl = asset ? generationLogAssetAccessUrl(asset, settings) : "";
     return (
         <div className="space-y-4">
             <div className="grid gap-3 sm:grid-cols-2">
@@ -1998,16 +1996,7 @@ function GenerationLogDetail({ log, settings }: { log: StoredGenerationLog; sett
                 <InfoBox label="模型" value={log.model || "-"} />
                 <InfoBox label="数量" value={`成功 ${log.successCount} / 失败 ${log.failCount} / 共 ${log.count}`} />
             </div>
-            {assetUrl ? (
-                <div className="rounded-lg border border-stone-200 p-3 dark:border-stone-800">
-                    {asset.type === "video" ? (
-                        <video className="max-h-[420px] w-full rounded-md bg-black object-contain" src={assetUrl} controls playsInline />
-                    ) : (
-                        <img className="max-h-[420px] w-full rounded-md bg-stone-100 object-contain dark:bg-stone-900" src={assetUrl} alt="" referrerPolicy="no-referrer" />
-                    )}
-                    <GenerationAssetAddressList asset={asset} assetUrl={assetUrl} />
-                </div>
-            ) : null}
+            <GenerationLogResultSection log={log} settings={settings} />
             <div>
                 <div className="mb-1 text-sm font-semibold text-stone-950 dark:text-stone-100">提示词</div>
                 <div className="max-h-48 overflow-y-auto whitespace-pre-wrap rounded-lg border border-stone-200 bg-stone-50 p-3 text-sm leading-6 text-stone-700 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-200">{log.prompt || "-"}</div>
@@ -2022,9 +2011,56 @@ function GenerationLogDetail({ log, settings }: { log: StoredGenerationLog; sett
     );
 }
 
+function GenerationLogResultSection({ log, settings }: { log: StoredGenerationLog; settings: AuthSettings["generationAssetStorage"] }) {
+    const assets = (log.assets || []).filter((asset) => Boolean(generationLogAssetAccessUrl(asset, settings)));
+    if (!assets.length) {
+        return (
+            <div className="rounded-lg border border-dashed border-stone-300 bg-stone-50 p-4 dark:border-stone-700 dark:bg-stone-900/70">
+                <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-stone-950 dark:text-stone-100">
+                    {log.kind === "video" ? <Film className="size-4" /> : <ImageIcon className="size-4" />}
+                    生成结果
+                </div>
+                <div className="text-sm leading-6 text-stone-500 dark:text-stone-400">
+                    {log.status === "success" ? "这条日志没有记录可访问的远程结果地址或服务器副本。如果接口只返回 base64，且后台未开启保存服务器副本，刷新后后台无法还原结果图片。" : "这条日志没有成功结果，暂无可预览的图片或视频。"}
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div className="rounded-lg border border-stone-200 p-3 dark:border-stone-800">
+            <div className="mb-3 flex items-center justify-between gap-3">
+                <div className="text-sm font-semibold text-stone-950 dark:text-stone-100">生成结果</div>
+                <Tag className="m-0" color={log.kind === "video" ? "purple" : "blue"}>
+                    {assets.length} 个结果
+                </Tag>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+                {assets.map((asset, index) => {
+                    const assetUrl = generationLogAssetAccessUrl(asset, settings);
+                    return (
+                        <div key={`${asset.url}-${index}`} className="min-w-0 rounded-lg border border-stone-200 bg-stone-50 p-3 dark:border-stone-800 dark:bg-stone-900/60">
+                            <div className="mb-2 flex items-center justify-between gap-2 text-xs font-medium text-stone-500 dark:text-stone-400">
+                                <span>{asset.type === "video" ? `视频 ${index + 1}` : `图片 ${index + 1}`}</span>
+                                {asset.width || asset.height ? <span>{[asset.width, asset.height].filter(Boolean).join("x")}</span> : null}
+                            </div>
+                            {asset.type === "video" ? (
+                                <video className="max-h-[300px] w-full rounded-md bg-black object-contain" src={assetUrl} controls playsInline preload="metadata" />
+                            ) : (
+                                <img className="max-h-[300px] w-full rounded-md bg-white object-contain dark:bg-stone-950" src={assetUrl} alt="" referrerPolicy="no-referrer" loading="lazy" />
+                            )}
+                            <GenerationAssetAddressList asset={asset} assetUrl={assetUrl} />
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+    );
+}
+
 function GenerationAssetAddressList({ asset, assetUrl }: { asset: StoredGenerationLog["assets"][number]; assetUrl: string }) {
     const rows = [
-        { key: "active", label: generationLogAssetAddressLabel(assetUrl), url: assetUrl },
+        { key: "active", label: generationLogAssetAddressLabel(asset, assetUrl), url: assetUrl },
         asset.remoteUrl && asset.remoteUrl !== assetUrl ? { key: "remote", label: "远程结果地址", url: asset.remoteUrl } : null,
         asset.serverUrl && asset.serverUrl !== assetUrl ? { key: "server", label: "服务器兜底地址", url: asset.serverUrl } : null,
     ].filter((item): item is { key: string; label: string; url: string } => Boolean(item?.url));
@@ -2055,7 +2091,8 @@ function GenerationAssetAddressList({ asset, assetUrl }: { asset: StoredGenerati
     );
 }
 
-function generationLogAssetAddressLabel(url: string) {
+function generationLogAssetAddressLabel(asset: StoredGenerationLog["assets"][number], url: string) {
+    if (asset.remoteUrl && asset.remoteUrl !== url) return "当前预览地址";
     return url.startsWith("/api/generation-log-assets/") ? "服务器兜底地址" : "远程结果地址";
 }
 

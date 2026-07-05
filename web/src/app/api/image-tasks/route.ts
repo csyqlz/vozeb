@@ -219,7 +219,7 @@ async function runOpenAiImageTask(task: ImageTask, origin: string, cookie: strin
             cache: "no-store",
         });
         if (!response.ok) {
-            const message = await readFetchError(response, "鍥剧墖鐢熸垚澶辫触");
+            const message = await readFetchError(response, "图片生成失败");
             if (shouldTryNextImageResponseFormat("b64_json", response.status, message)) return runOpenAiImageTaskWithUrlResponse(task, origin, cookie);
             if (shouldFallbackToResponsesImage(response.status, message)) return runOpenAiResponsesImageTask(task, origin, cookie);
             throw new Error(message);
@@ -281,7 +281,7 @@ async function runOpenAiImageTaskWithUrlResponse(task: ImageTask, origin: string
         if (task.mask) formData.set("mask", dataUrlToFile(task.mask.dataUrl, task.mask.name || "mask.png", task.mask.type));
         const response = await taskFetch(config, url, { method: "POST", headers, body: formData, cache: "no-store" });
         if (!response.ok) {
-            const message = await readFetchError(response, "鍥剧墖鐢熸垚澶辫触");
+            const message = await readFetchError(response, "图片生成失败");
             if (shouldFallbackToJsonImageEdit(response.status, message)) return runOpenAiJsonImageEditTask(task, url, quality, requestSize, cookie, "url");
             if (shouldFallbackToResponsesImage(response.status, message)) return runOpenAiResponsesImageTask(task, origin, cookie);
             throw new Error(message);
@@ -307,7 +307,7 @@ async function runOpenAiImageTaskWithUrlResponse(task: ImageTask, origin: string
         cache: "no-store",
     });
     if (!response.ok) {
-        const message = await readFetchError(response, "鍥剧墖鐢熸垚澶辫触");
+        const message = await readFetchError(response, "图片生成失败");
         if (shouldFallbackToResponsesImage(response.status, message)) return runOpenAiResponsesImageTask(task, origin, cookie);
         throw new Error(message);
     }
@@ -326,7 +326,7 @@ async function runOpenAiResponsesImageTask(task: ImageTask, origin: string, cook
     for (const body of buildResponsesImageBodies(task)) {
         const response = await taskFetch(config, url, { method: "POST", headers, body: JSON.stringify(body), cache: "no-store" });
         if (!response.ok) {
-            lastError = await readFetchError(response, "鍥剧墖鐢熸垚澶辫触");
+            lastError = await readFetchError(response, "图片生成失败");
             if (response.status === 400 || response.status === 422) continue;
             throw new Error(lastError);
         }
@@ -335,7 +335,7 @@ async function runOpenAiResponsesImageTask(task: ImageTask, origin: string, cook
         return { dataUrl: await parseImagePayloadOrPoll(config, payload, resultBaseUrl, cookie, url), pointsRemaining: readPointsRemaining(response.headers) };
     }
 
-    throw new Error(lastError || "鍥剧墖鐢熸垚澶辫触");
+    throw new Error(lastError || "图片生成失败");
 }
 
 function buildResponsesImageBodies(task: ImageTask) {
@@ -644,9 +644,11 @@ function resolveTaskMediaUrl(config: ImageTaskConfig, value: string, baseUrl: st
 async function inlineRemoteImageResult(value: string, origin: string, cookie: string) {
     const url = (value || "").trim();
     if (!url || url.startsWith("data:")) return { dataUrl: url };
-    const remoteUrl = isRemoteMediaUrl(url) ? url : undefined;
+    const mediaSource = resolveProxiedMediaSource(url, origin);
+    const remoteUrl = mediaSource.remoteUrl || (isRemoteMediaUrl(url) && !mediaSource.proxyUrl ? url : undefined);
+    const fallbackUrl = remoteUrl || mediaSource.proxyUrl;
     const fetchUrl = url.startsWith("/") ? `${origin}${url}` : url;
-    if (!isRemoteMediaUrl(fetchUrl)) return { dataUrl: url, remoteUrl };
+    if (!isRemoteMediaUrl(fetchUrl)) return { dataUrl: url, remoteUrl: fallbackUrl };
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), INLINE_IMAGE_TIMEOUT_MS);
@@ -656,18 +658,37 @@ async function inlineRemoteImageResult(value: string, origin: string, cookie: st
             cache: "no-store",
             signal: controller.signal,
         });
-        if (!response.ok || !response.body) return { dataUrl: url, remoteUrl };
+        if (!response.ok || !response.body) return { dataUrl: url, remoteUrl: fallbackUrl };
         const contentLength = Number(response.headers.get("content-length") || 0);
-        if (contentLength > MAX_INLINE_IMAGE_BYTES) return { dataUrl: url, remoteUrl };
+        if (contentLength > MAX_INLINE_IMAGE_BYTES) return { dataUrl: url, remoteUrl: fallbackUrl };
         const bytes = Buffer.from(await response.arrayBuffer());
-        if (bytes.length > MAX_INLINE_IMAGE_BYTES) return { dataUrl: url, remoteUrl };
+        if (bytes.length > MAX_INLINE_IMAGE_BYTES) return { dataUrl: url, remoteUrl: fallbackUrl };
         const mimeType = response.headers.get("content-type")?.split(";", 1)[0] || "image/png";
-        if (!mimeType.startsWith("image/")) return { dataUrl: url, remoteUrl };
-        return { dataUrl: `data:${mimeType};base64,${bytes.toString("base64")}`, remoteUrl };
+        if (!mimeType.startsWith("image/")) return { dataUrl: url, remoteUrl: fallbackUrl };
+        return { dataUrl: `data:${mimeType};base64,${bytes.toString("base64")}`, remoteUrl: fallbackUrl };
     } catch {
-        return { dataUrl: url, remoteUrl };
+        return { dataUrl: url, remoteUrl: fallbackUrl };
     } finally {
         clearTimeout(timer);
+    }
+}
+
+function resolveProxiedMediaSource(value: string, origin: string) {
+    const trimmed = value.trim();
+    const absolute = trimmed.startsWith("/") ? `${origin}${trimmed}` : trimmed;
+    try {
+        const parsed = new URL(absolute);
+        const isSameOrigin = parsed.origin === origin;
+        const isProxyPath = parsed.pathname === "/api/media-proxy" || /^\/api\/ai\/system\/[^/]+\/_media$/.test(parsed.pathname);
+        if (!isProxyPath) return {};
+        const sourceUrl = parsed.searchParams.get("url") || "";
+        const proxyUrl = trimmed.startsWith("/") || isSameOrigin ? `${parsed.pathname}${parsed.search}` : trimmed;
+        return {
+            remoteUrl: isRemoteMediaUrl(sourceUrl) ? sourceUrl : undefined,
+            proxyUrl,
+        };
+    } catch {
+        return {};
     }
 }
 
@@ -729,12 +750,13 @@ function dataUrlToFile(dataUrl: string, name: string, fallbackType?: string) {
 
 async function readFetchError(response: Response, fallback: string) {
     const text = await response.text();
-    if (!text) return `${fallback}，${response.status}`;
+    const statusText = `${fallback}，状态码 ${response.status}`;
+    if (!text) return statusText;
     try {
         const payload = JSON.parse(text) as { error?: { message?: string }; msg?: string };
-        return payload.msg || payload.error?.message || `${fallback}，${response.status}`;
+        return payload.msg || payload.error?.message || statusText;
     } catch {
-        return text.slice(0, 300) || `${fallback}，${response.status}`;
+        return text.slice(0, 300) || statusText;
     }
 }
 
