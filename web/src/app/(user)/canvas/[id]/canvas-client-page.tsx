@@ -1569,7 +1569,7 @@ function VozebCanvasPage() {
     }, [finishNodeDrag, handleGlobalMouseMove, handleGlobalMouseUp, handleGlobalPointerMove]);
 
     const createImageFileNode = useCallback(async (file: File, position: Position) => {
-        const image = await uploadImage(file);
+        const image = await uploadCanvasImage(file);
         const size = fitNodeSize(image.width, image.height);
         const id = `image-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
         const newNode: CanvasNodeData = {
@@ -1935,7 +1935,7 @@ function VozebCanvasPage() {
     const cropImageNode = useCallback(async (node: CanvasNodeData, crop: CanvasImageCropRect) => {
         if (!node.metadata?.content) return;
         const cropped = await cropDataUrl(node.metadata.content, crop);
-        const image = await uploadImage(cropped);
+        const image = await uploadCanvasImage(cropped);
         const width = Math.min(node.width, Math.max(220, image.width));
         const childId = nanoid();
         const child: CanvasNodeData = {
@@ -1969,7 +1969,7 @@ function VozebCanvasPage() {
             const startY = node.position.y;
             const childNodes = await Promise.all(
                 pieces.map(async (piece) => {
-                    const image = await uploadImage(piece.dataUrl);
+                    const image = await uploadCanvasImage(piece.dataUrl);
                     const id = nanoid();
                     return {
                         id,
@@ -2046,7 +2046,7 @@ function VozebCanvasPage() {
         if (!node.metadata?.content) return;
         setUpscaleNodeId(null);
         const upscaled = await upscaleDataUrl(node.metadata.content, params);
-        const image = await uploadImage(upscaled);
+        const image = await uploadCanvasImage(upscaled);
         const size = fitNodeSize(image.width, image.height);
         const childId = nanoid();
         const child: CanvasNodeData = {
@@ -2186,7 +2186,7 @@ function VozebCanvasPage() {
                     event.target.value = "";
                     return;
                 }
-                const image = await uploadImage(file);
+                const image = await uploadCanvasImage(file);
                 const size = fitNodeSize(image.width, image.height);
                 setNodes((prev) =>
                     prev.map((node) =>
@@ -2726,7 +2726,7 @@ function VozebCanvasPage() {
 
     const insertAssistantImage = useCallback(
         async (image: CanvasAssistantImage) => {
-            const storedImage = image.storageKey ? { url: image.dataUrl, storageKey: image.storageKey, width: 1, height: 1, bytes: 0, mimeType: "image/png" } : await uploadImage(image.dataUrl);
+            const storedImage = image.storageKey ? { url: image.dataUrl, storageKey: image.storageKey, width: 1, height: 1, bytes: 0, mimeType: "image/png" } : await uploadCanvasImage(image.dataUrl);
             const meta = storedImage.width === 1 && storedImage.height === 1 ? await readImageMeta(storedImage.url) : storedImage;
             const config = fitNodeSize(meta.width, meta.height);
             const center = screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
@@ -3389,6 +3389,11 @@ function audioExtension(mimeType?: string) {
     return "mp3";
 }
 
+async function uploadCanvasImage(input: string | Blob): Promise<UploadedImage> {
+    const image = await uploadImage(input);
+    return { ...image, url: await resolveStoredImageDataUrl(image.storageKey, image.url) };
+}
+
 async function uploadGeneratedCanvasImage(url: string, remoteFallback = "", serverFallback = ""): Promise<UploadedImage> {
     const remoteUrl = isRemoteGeneratedUrl(remoteFallback) ? remoteFallback : isRemoteGeneratedUrl(url) ? url : "";
     const serverUrl = isServerGeneratedUrl(serverFallback) ? serverFallback : isServerGeneratedUrl(url) ? url : "";
@@ -3396,8 +3401,8 @@ async function uploadGeneratedCanvasImage(url: string, remoteFallback = "", serv
     const candidates = Array.from(new Set([localUrl, remoteUrl, serverUrl, url].filter(Boolean)));
     for (const candidate of candidates) {
         try {
-            const image = await uploadImage(candidate);
-            return { ...image, url: await resolveStoredImageDataUrl(image.storageKey, image.url), remoteUrl: remoteUrl || undefined, serverUrl: serverUrl || undefined };
+            const image = await uploadCanvasImage(candidate);
+            return { ...image, remoteUrl: remoteUrl || undefined, serverUrl: serverUrl || undefined };
         } catch {
             // Try the next fallback source.
         }
@@ -3501,7 +3506,7 @@ async function hydrateCanvasImages(nodes: CanvasNodeData[]) {
             if (!content && fallbackContent) return { ...node, metadata: { ...node.metadata, content: fallbackContent } };
             const contentValue = content || "";
             if (!contentValue.startsWith("data:image/")) return node;
-            return { ...node, metadata: { ...node.metadata, ...imageMetadata(await uploadImage(contentValue)) } };
+            return { ...node, metadata: { ...node.metadata, ...imageMetadata(await uploadCanvasImage(contentValue)) } };
         }),
     );
 }
@@ -3518,8 +3523,8 @@ async function hydrateAssistantImages(sessions: CanvasAssistantSession[]) {
     const hydrateItem = async <T extends { dataUrl?: string; storageKey?: string }>(item: T) => {
         if (item.storageKey) return { ...item, dataUrl: await resolveStoredImageDataUrl(item.storageKey, item.dataUrl) };
         if (item.dataUrl?.startsWith("data:image/")) {
-            const image = await uploadImage(item.dataUrl);
-            return { ...item, dataUrl: await resolveStoredImageDataUrl(image.storageKey, image.url), storageKey: image.storageKey };
+            const image = await uploadCanvasImage(item.dataUrl);
+            return { ...item, dataUrl: image.url, storageKey: image.storageKey };
         }
         return item;
     };

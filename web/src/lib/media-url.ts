@@ -8,6 +8,7 @@ export function resolveGeneratedMediaUrl(value: string, baseUrl?: string | null)
     if (!base) return mediaUrl;
 
     try {
+        // Leading-slash result URLs belong to the upstream API host, not the app host.
         if (mediaUrl.startsWith("/")) return new URL(mediaUrl, base.origin).toString();
         return new URL(mediaUrl, directoryBaseUrl(base)).toString();
     } catch {

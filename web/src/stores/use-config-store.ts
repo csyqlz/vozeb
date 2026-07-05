@@ -328,7 +328,7 @@ export function createModelChannel(channel?: Partial<ModelChannel>): ModelChanne
         name: channel?.name?.trim() || "新渠道",
         baseUrl: channel?.baseUrl?.trim() || OPENAI_BASE_URL,
         apiKey: channel?.apiKey || "",
-        apiFormat: "openai",
+        apiFormat: channel?.apiFormat === "gemini" ? "gemini" : "openai",
         models: uniqueRawModels(channel?.models || []),
     };
 }

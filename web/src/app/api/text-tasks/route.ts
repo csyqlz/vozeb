@@ -12,6 +12,9 @@ export const dynamic = "force-dynamic";
 
 configureServerProxyDispatcher();
 
+const TASK_HEARTBEAT_MS = 30 * 1000;
+const MODEL_REQUEST_TIMEOUT_MS = 20 * 60 * 1000;
+
 type CreateTextTaskBody = {
     config?: TextTaskConfig;
     messages?: AiTextMessage[];
@@ -22,6 +25,12 @@ type ResponseInputItem = { role: "system" | "user" | "assistant"; content: strin
 type ResponseApiPayload = {
     output?: Array<{ type?: string; content?: Array<{ type?: string; text?: string }> }>;
     output_text?: string;
+    error?: { message?: string };
+    code?: number;
+    msg?: string;
+};
+type ChatCompletionPayload = {
+    choices?: Array<{ message?: { content?: string | Array<{ type?: string; text?: string }> } }>;
     error?: { message?: string };
     code?: number;
     msg?: string;
@@ -56,6 +65,9 @@ export async function POST(request: Request) {
 
 async function runTextTask(task: TextTask, origin: string, cookie: string) {
     updateTextTask(task.id, { status: "running" });
+    const heartbeat = setInterval(() => {
+        updateTextTask(task.id, { status: "running" });
+    }, TASK_HEARTBEAT_MS);
     try {
         const result = task.config.apiFormat === "gemini" ? await runGeminiTextTask(task, origin, cookie) : await runOpenAiTextTask(task, origin, cookie);
         updateTextTask(task.id, {
@@ -68,6 +80,8 @@ async function runTextTask(task: TextTask, origin: string, cookie: string) {
     } catch (error) {
         const message = toSafeGenerationErrorMessage(error, "文本生成失败");
         updateTextTask(task.id, { status: "error", error: message, messages: [], config: clearSecret(task.config) });
+    } finally {
+        clearInterval(heartbeat);
     }
 }
 
@@ -81,10 +95,30 @@ async function runOpenAiTextTask(task: TextTask, origin: string, cookie: string)
         body: JSON.stringify({ model: config.model, input: toResponseInput(withSystemMessage(config, task.messages)) }),
         cache: "no-store",
     });
-    if (!response.ok) throw new Error(await readFetchError(response, "文本生成失败"));
+    if (!response.ok) {
+        const errorMessage = await readFetchError(response, "文本生成失败");
+        if (shouldFallbackToChatCompletions(response.status, errorMessage)) return runOpenAiChatCompletionTask(task, origin, cookie);
+        throw new Error(errorMessage);
+    }
     const payload = (await response.json()) as ResponseApiPayload;
     validateResponsePayload(payload);
     return { content: parseOpenAiContent(payload), pointsRemaining: readPointsRemaining(response.headers) };
+}
+
+async function runOpenAiChatCompletionTask(task: TextTask, origin: string, cookie: string) {
+    const config = task.config;
+    const headers = taskHeaders(config, cookie);
+    headers.set("content-type", "application/json");
+    const response = await taskFetch(config, taskUrl(config, "/chat/completions", origin), {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ model: config.model, messages: toChatMessages(withSystemMessage(config, task.messages)) }),
+        cache: "no-store",
+    });
+    if (!response.ok) throw new Error(await readFetchError(response, "文本生成失败"));
+    const payload = (await response.json()) as ChatCompletionPayload;
+    validateChatCompletionPayload(payload);
+    return { content: parseChatCompletionContent(payload), pointsRemaining: readPointsRemaining(response.headers) };
 }
 
 async function runGeminiTextTask(task: TextTask, origin: string, cookie: string) {
@@ -163,6 +197,10 @@ function toResponseContent(content: AiTextMessage["content"]): string | Response
     return content.map((item) => (item.type === "text" ? { type: "input_text" as const, text: item.text } : { type: "input_image" as const, image_url: item.image_url.url }));
 }
 
+function toChatMessages(messages: AiTextMessage[]) {
+    return messages.map((message) => ({ role: message.role, content: message.content }));
+}
+
 function toGeminiBody(config: TextTaskConfig, messages: AiTextMessage[]) {
     const systemText = [(config.systemPrompt || "").trim(), ...messages.flatMap((message) => (message.role === "system" ? [geminiTextContent(message.content)] : []))].filter(Boolean).join("\n\n");
     return {
@@ -198,6 +236,16 @@ function parseOpenAiContent(payload: ResponseApiPayload) {
     );
 }
 
+function parseChatCompletionContent(payload: ChatCompletionPayload) {
+    return payload.choices?.map((choice) => readChatContent(choice.message?.content)).join("") || "";
+}
+
+function readChatContent(content?: string | Array<{ type?: string; text?: string }>) {
+    if (typeof content === "string") return content;
+    if (!Array.isArray(content)) return "";
+    return content.map((item) => item.text || "").join("");
+}
+
 function parseGeminiContent(payload: GeminiPayload) {
     return (
         payload.candidates
@@ -208,6 +256,11 @@ function parseGeminiContent(payload: GeminiPayload) {
 }
 
 function validateResponsePayload(payload: ResponseApiPayload) {
+    if (typeof payload.code === "number" && payload.code !== 0) throw new Error(payload.msg || "请求失败");
+    if (payload.error?.message) throw new Error(payload.error.message);
+}
+
+function validateChatCompletionPayload(payload: ChatCompletionPayload) {
     if (typeof payload.code === "number" && payload.code !== 0) throw new Error(payload.msg || "请求失败");
     if (payload.error?.message) throw new Error(payload.error.message);
 }
@@ -232,6 +285,12 @@ function readStatusError(status: number | undefined, fallback: string) {
     if (status === 401 || status === 403) return "鉴权失败，请检查 API Key、套餐权限或模型权限";
     if (status === 429) return "请求被限流或额度不足，请稍后重试";
     return status ? `${fallback}，状态码 ${status}` : fallback;
+}
+
+function shouldFallbackToChatCompletions(status: number, message: string) {
+    if (status === 404 || status === 405) return true;
+    if (status !== 400) return false;
+    return /responses|endpoint|route|path|not found|unsupported|unknown url|cannot post|invalid url|no such/i.test(message);
 }
 
 function taskUrl(config: TextTaskConfig, path: string, origin: string) {
@@ -262,7 +321,11 @@ function taskHeaders(config: TextTaskConfig, cookie: string) {
 }
 
 function taskFetch(config: TextTaskConfig, url: string, init: RequestInit) {
-    return isInternalApiBaseUrl(config.baseUrl) ? fetchInternalApi(url, init) : fetch(url, init);
+    const nextInit = {
+        ...init,
+        signal: init.signal || AbortSignal.timeout(MODEL_REQUEST_TIMEOUT_MS),
+    };
+    return isInternalApiBaseUrl(config.baseUrl) ? fetchInternalApi(url, nextInit) : fetch(url, nextInit);
 }
 
 function geminiHeaders(config: TextTaskConfig, cookie: string) {
