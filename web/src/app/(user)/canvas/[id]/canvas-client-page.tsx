@@ -3258,13 +3258,17 @@ function CanvasTopBar({
                     <span className="canvas-topbar-divider h-6 w-px" style={{ background: theme.toolbar.border }} />
                     <Button
                         type="text"
-                        className="canvas-agent-button !h-10 !rounded-xl !px-3 !font-medium"
+                        className="canvas-agent-button !font-medium"
                         style={{
                             background: agentOpen ? theme.toolbar.activeBg : theme.toolbar.panel,
                             borderColor: agentOpen ? theme.toolbar.activeBg : theme.toolbar.border,
                             borderStyle: "solid",
                             borderWidth: 1,
+                            borderRadius: 14,
                             color: agentOpen ? theme.toolbar.activeText : theme.toolbar.item,
+                            height: 40,
+                            minHeight: 40,
+                            paddingInline: 12,
                             boxShadow: colorTheme === "dark" ? "0 10px 30px rgba(0,0,0,.28)" : "0 10px 24px rgba(28,25,23,.08)",
                         }}
                         icon={<Bot className="size-4" />}

@@ -1,7 +1,7 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Keyboard, LogOut, Settings2, ShieldCheck, UserCircle } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -46,6 +46,8 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
     const [pointsOpen, setPointsOpen] = useState(false);
     const [pointsLoading, setPointsLoading] = useState(false);
     const [pointRecords, setPointRecords] = useState<PointRecord[]>([]);
+    const [accountOpen, setAccountOpen] = useState(false);
+    const rootRef = useRef<HTMLDivElement>(null);
     const user = useUserStore((state) => state.user);
     const setUser = useUserStore((state) => state.setUser);
     const clearSession = useUserStore((state) => state.clearSession);
@@ -128,6 +130,30 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
         }
     };
 
+    const handleAccountMenuClick: MenuProps["onClick"] = (info) => {
+        setAccountOpen(false);
+        void handleMenuClick(info);
+    };
+
+    useEffect(() => {
+        if (variant !== "canvas" || (!pointsOpen && !accountOpen)) return;
+        const closeCanvasPopups = (event: PointerEvent) => {
+            const target = event.target;
+            if (!(target instanceof Node)) return;
+            if (rootRef.current?.contains(target)) return;
+            if (
+                target instanceof Element &&
+                target.closest(".user-points-popover, .ant-dropdown, .ant-dropdown-menu, .ant-dropdown-menu-submenu, .ant-dropdown-menu-submenu-popup")
+            ) {
+                return;
+            }
+            setPointsOpen(false);
+            setAccountOpen(false);
+        };
+        document.addEventListener("pointerdown", closeCanvasPopups, true);
+        return () => document.removeEventListener("pointerdown", closeCanvasPopups, true);
+    }, [variant, pointsOpen, accountOpen]);
+
     const handleCheckIn = async () => {
         if (!user || user.checkedInToday || checkingIn) return;
         setCheckingIn(true);
@@ -159,16 +185,25 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
         }
     };
 
+    const handlePointsOpenChange = (open: boolean) => {
+        setPointsOpen(open);
+        if (!open) return;
+        setAccountOpen(false);
+        void loadPointRecords();
+    };
+
+    const handleAccountOpenChange = (open: boolean) => {
+        setAccountOpen(open);
+        if (open) setPointsOpen(false);
+    };
+
     return (
-        <div className={cn("user-status-actions inline-flex shrink-0 items-center gap-1.5 sm:gap-2", variant === "canvas" ? "canvas-user-status-actions" : "app-user-status-actions")}>
+        <div ref={rootRef} className={cn("user-status-actions inline-flex shrink-0 items-center gap-1.5 sm:gap-2", variant === "canvas" ? "canvas-user-status-actions" : "app-user-status-actions")}>
             {user ? (
                 <Popover
                     rootClassName="user-points-popover"
                     open={pointsOpen}
-                    onOpenChange={(open) => {
-                        setPointsOpen(open);
-                        if (open) void loadPointRecords();
-                    }}
+                    onOpenChange={handlePointsOpenChange}
                     trigger="click"
                     placement="bottomRight"
                     content={<PointRecordPanel loading={pointsLoading} records={pointRecords} />}
@@ -222,7 +257,12 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
             ) : null}
             {user ? (
                 <>
-                    <Dropdown menu={{ items: accountItems, onClick: handleMenuClick }} trigger={["click"]} placement="bottomRight">
+                    <Dropdown
+                        {...(variant === "canvas" ? { open: accountOpen, onOpenChange: handleAccountOpenChange } : {})}
+                        menu={{ items: accountItems, onClick: handleAccountMenuClick }}
+                        trigger={["click"]}
+                        placement="bottomRight"
+                    >
                         <button
                             type="button"
                             className={cn(variant === "canvas" ? canvasControlClass : defaultControlClass, "max-w-[36px] gap-2 px-2.5 sm:max-w-40", variant === "canvas" ? "canvas-account-action" : "app-account-action")}
@@ -256,7 +296,7 @@ function formatQuotaReward(rewardPoints?: number) {
 
 function PointRecordPanel({ loading, records }: { loading: boolean; records: PointRecord[] }) {
     return (
-        <div className="w-[min(18rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)]">
+        <div className="user-points-panel w-[min(18rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)]">
             <div className="mb-3 text-sm font-semibold text-stone-950 dark:text-stone-100">积分记录</div>
             {loading ? (
                 <div className="flex h-24 items-center justify-center">
