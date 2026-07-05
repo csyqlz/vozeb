@@ -119,6 +119,8 @@ docker compose -f docker-compose.local.yml up -d --build
 
 当前主应用镜像只启动 Next.js。画布、我的素材、生成记录和 AI API Key 默认保存在浏览器本地。
 
+登录状态通过服务端 Session Cookie 保持。使用 `http://服务器IP:3000` 直连时，VOZEB 会写入可在 HTTP 下保存的 Cookie；使用 HTTPS 反向代理时，请保留 `X-Forwarded-Proto: https` 或标准 `Forwarded` 头，VOZEB 会自动启用 `Secure` Cookie。若你的代理环境比较特殊，可以在容器环境变量中设置 `VOZEB_COOKIE_SECURE=true` 或 `VOZEB_COOKIE_SECURE=false` 强制指定。
+
 账号、后台网站设置、用户积分、签到记录和公共提示词库会写入服务端 `.data` 目录：
 
 - 用户与后台设置：`/app/web/.data/auth.json`

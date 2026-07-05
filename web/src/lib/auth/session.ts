@@ -21,31 +21,55 @@ export async function clearCurrentSession() {
     await deleteSession(await getSessionCookieValue());
 }
 
-export function setSessionCookie(response: NextResponse, value: string) {
+export function setSessionCookie(response: NextResponse, value: string, request?: Request) {
     response.cookies.set(SESSION_COOKIE_NAME, value, {
         httpOnly: true,
         sameSite: "lax",
-        secure: process.env.NODE_ENV === "production",
+        secure: shouldUseSecureSessionCookie(request),
         maxAge: sessionMaxAgeSeconds(),
         path: "/",
     });
 }
 
-export function clearSessionCookie(response: NextResponse) {
+export function clearSessionCookie(response: NextResponse, request?: Request) {
+    const secure = shouldUseSecureSessionCookie(request);
     response.cookies.set(SESSION_COOKIE_NAME, "", {
         httpOnly: true,
         sameSite: "lax",
-        secure: process.env.NODE_ENV === "production",
+        secure,
         maxAge: 0,
         path: "/",
     });
     response.cookies.set(LEGACY_SESSION_COOKIE_NAME, "", {
         httpOnly: true,
         sameSite: "lax",
-        secure: process.env.NODE_ENV === "production",
+        secure,
         maxAge: 0,
         path: "/",
     });
+}
+
+export function shouldUseSecureSessionCookie(request?: Request) {
+    const override = process.env.VOZEB_COOKIE_SECURE?.trim().toLowerCase();
+    if (["1", "true", "yes", "on"].includes(override || "")) return true;
+    if (["0", "false", "no", "off"].includes(override || "")) return false;
+
+    const forwardedProto = request?.headers.get("x-forwarded-proto")?.split(",")[0]?.trim().toLowerCase();
+    if (forwardedProto) return forwardedProto === "https";
+
+    const forwarded = request?.headers.get("forwarded") || "";
+    const forwardedProtoMatch = forwarded.match(/(?:^|;|,)\s*proto=([^;,]+)/i);
+    if (forwardedProtoMatch?.[1]) return forwardedProtoMatch[1].replace(/^"|"$/g, "").toLowerCase() === "https";
+
+    if (request?.url) {
+        try {
+            return new URL(request.url).protocol === "https:";
+        } catch {
+            return false;
+        }
+    }
+
+    return false;
 }
 
 export function serializeCurrentUser(user: CurrentUser) {

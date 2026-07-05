@@ -12,7 +12,7 @@ export async function POST(request: Request) {
         const user = await authenticateUser({ username: body.username || "", password: body.password || "" });
         const sessionValue = await createSession(user.id);
         const response = NextResponse.json({ user: serializeCurrentUser(user) });
-        setSessionCookie(response, sessionValue);
+        setSessionCookie(response, sessionValue, request);
         return response;
     } catch (error) {
         if (isAuthInputError(error)) return NextResponse.json({ error: error.message }, { status: error.status });

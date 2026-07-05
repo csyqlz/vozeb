@@ -18,7 +18,7 @@ export async function POST(request: Request) {
         });
         const sessionValue = await createSession(user.id);
         const response = NextResponse.json({ user: serializeCurrentUser(user) });
-        setSessionCookie(response, sessionValue);
+        setSessionCookie(response, sessionValue, request);
         return response;
     } catch (error) {
         return authErrorResponse(error);
