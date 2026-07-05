@@ -1,6 +1,6 @@
 # VOZEB 文档索引
 
-当前版本：`v0.8.9`。VOZEB 是基于原创开源画布项目继续开发的二开版本，当前仓库为 `csyqlz/vozeb`。
+当前版本：`v0.9.0`。VOZEB 是基于原创开源画布项目继续开发的二开版本，当前仓库为 `csyqlz/vozeb`。
 
 ## 项目介绍
 
@@ -37,6 +37,7 @@
 
 - [更新日志](/docs/progress/changelog)
 - [待测试](/docs/progress/pending-test)
+- [发布检查清单](/docs/progress/release-checklist)
 - [TODO](/docs/progress/todo)
 
 ## 说明

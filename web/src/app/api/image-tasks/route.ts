@@ -148,7 +148,7 @@ async function runOpenAiImageTask(task: ImageTask, origin: string, cookie: strin
         formData.set("model", config.model);
         formData.set("prompt", withSystemPrompt(config, task.prompt));
         formData.set("n", "1");
-        formData.set("response_format", "b64_json");
+        formData.set("response_format", "url");
         formData.set("output_format", IMAGE_OUTPUT_FORMAT);
         if (quality) formData.set("quality", quality);
         if (requestSize) formData.set("size", requestSize);
@@ -166,7 +166,7 @@ async function runOpenAiImageTask(task: ImageTask, origin: string, cookie: strin
                 n: 1,
                 ...(quality ? { quality } : {}),
                 ...(requestSize ? { size: requestSize } : {}),
-                response_format: "b64_json",
+                response_format: "url",
                 output_format: IMAGE_OUTPUT_FORMAT,
             }),
             cache: "no-store",
@@ -272,8 +272,8 @@ function parseImagePayload(payload: ImageApiResponse) {
 }
 
 function resolveImageDataUrl(item: Record<string, unknown>) {
-    if (typeof item.b64_json === "string" && item.b64_json) return `data:image/png;base64,${item.b64_json}`;
     if (typeof item.url === "string" && item.url) return item.url;
+    if (typeof item.b64_json === "string" && item.b64_json) return `data:image/png;base64,${item.b64_json}`;
     return "";
 }
 

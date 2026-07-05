@@ -16,7 +16,7 @@ import { imageReferenceLabel } from "@/lib/image-reference-prompt";
 import { modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { nanoid } from "nanoid";
-import { formatBytes, formatDuration } from "@/lib/image-utils";
+import { formatBytes, formatDuration, readImageMeta } from "@/lib/image-utils";
 import { APP_STORAGE_NAME, LEGACY_APP_STORAGE_NAME } from "@/lib/storage-keys";
 import { createImageGenerationTask, waitForImageGenerationTask } from "@/services/api/image";
 import { deleteStoredImages, resolveImageUrl, uploadImage } from "@/services/image-storage";
@@ -26,6 +26,7 @@ import type { ReferenceImage } from "@/types/image";
 type GeneratedImage = {
     id: string;
     dataUrl: string;
+    remoteUrl?: string;
     storageKey?: string;
     slotIndex?: number;
     durationMs: number;
@@ -337,18 +338,19 @@ export default function ImagePage() {
 
     async function completeGenerationTask(logId: string, resultId: string, index: number, snapshot: GenerationSnapshot, pendingTask: PendingImageTask, controller?: AbortController) {
         const result = await waitForImageGenerationTask(snapshot.config, { id: pendingTask.taskId, kind: pendingTask.kind, model: pendingTask.model }, { signal: controller?.signal });
-        const stored = await uploadImage(result.dataUrl);
+        const imageMeta = await normalizeGeneratedImage(result.dataUrl);
         const durationMs = Date.now() - pendingTask.startedAt;
         const nextImage: GeneratedImage = {
             id: resultId,
-            dataUrl: result.dataUrl,
-            storageKey: stored.storageKey,
+            dataUrl: imageMeta.url,
+            remoteUrl: imageMeta.remoteUrl,
+            storageKey: imageMeta.storageKey,
             slotIndex: index,
             durationMs,
-            width: stored.width,
-            height: stored.height,
-            bytes: stored.bytes,
-            mimeType: stored.mimeType,
+            width: imageMeta.width,
+            height: imageMeta.height,
+            bytes: imageMeta.bytes,
+            mimeType: imageMeta.mimeType,
         };
         patchLogResult(logId, resultId, { status: "success", image: nextImage, error: undefined, task: undefined }, snapshot, durationMs, index);
         return nextImage;
@@ -1162,7 +1164,7 @@ async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog>
     const images = await Promise.all(
         (log.images || []).map(async (item) => ({
             ...item,
-            dataUrl: await hydrateGeneratedImageUrl(item.storageKey, item.dataUrl),
+            dataUrl: await hydrateGeneratedImageUrl(item.storageKey, item.dataUrl, item.remoteUrl),
         })),
     );
     const config = normalizeLogConfig(log);
@@ -1204,13 +1206,31 @@ function serializeLog(log: GenerationLog): GenerationLog {
     };
 }
 
-async function hydrateGeneratedImageUrl(storageKey?: string, fallback = "") {
-    if (isStableImageUrl(fallback)) return fallback;
-    return resolveImageUrl(storageKey, fallback);
+async function hydrateGeneratedImageUrl(storageKey?: string, fallback = "", remoteFallback = "") {
+    if (!storageKey && isStableImageUrl(fallback)) return fallback;
+    return resolveImageUrl(storageKey, fallback || remoteFallback);
+}
+
+async function normalizeGeneratedImage(url: string) {
+    if (isRemoteImageUrl(url)) {
+        try {
+            const stored = await uploadImage(url);
+            return { url: stored.url, remoteUrl: url, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType, storageKey: stored.storageKey };
+        } catch {
+            const meta = await readImageMeta(url);
+            return { url, remoteUrl: url, width: meta.width, height: meta.height, bytes: 0, mimeType: meta.mimeType, storageKey: undefined };
+        }
+    }
+    const stored = await uploadImage(url);
+    return { url: stored.url, remoteUrl: undefined, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType, storageKey: stored.storageKey };
 }
 
 function isStableImageUrl(value?: string) {
     return Boolean(value && (value.startsWith("data:") || /^https?:\/\//i.test(value)));
+}
+
+function isRemoteImageUrl(value: string) {
+    return /^https?:\/\//i.test(value);
 }
 
 function resultsFromLog(log: GenerationLog): GenerationResult[] {

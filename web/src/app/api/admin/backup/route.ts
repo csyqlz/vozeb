@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 
 import { NextResponse } from "next/server";
 
@@ -14,6 +14,8 @@ const RESTORE_FILE_MAP = {
     generationLogs: "generation-logs.json",
 } as const;
 const MAX_IMPORT_BYTES = 30 * 1024 * 1024;
+const RESTORE_IMPORT_BACKUP_LIMIT = 3;
+const RESTORE_IMPORT_BACKUP_PATTERN = /^\d{4}-\d{2}-\d{2}T.+Z$/;
 
 export async function GET() {
     const currentUser = await getCurrentUser();
@@ -80,11 +82,13 @@ export async function POST(request: Request) {
             await writeFile(resolveServerDataPath(entry.fileName), `${JSON.stringify(entry.value, null, 2)}\n`, "utf8");
         }),
     );
+    const removedSafetyBackups = await pruneRestoreImportBackups();
 
     return NextResponse.json({
         ok: true,
         imported: entries.map((entry) => entry.key),
         safetyBackupDir,
+        removedSafetyBackups,
     });
 }
 
@@ -135,6 +139,26 @@ async function copyCurrentDataFile(fileName: string, targetPath: string) {
     } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
+}
+
+async function pruneRestoreImportBackups() {
+    const backupRoot = resolveServerDataPath("restore-backups");
+    let entries: Array<{ name: string; isDirectory(): boolean }>;
+    try {
+        entries = await readdir(backupRoot, { withFileTypes: true });
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return 0;
+        throw error;
+    }
+
+    const importBackups = entries
+        .filter((entry) => entry.isDirectory() && RESTORE_IMPORT_BACKUP_PATTERN.test(entry.name))
+        .map((entry) => entry.name)
+        .sort((left, right) => right.localeCompare(left));
+    const removable = importBackups.slice(RESTORE_IMPORT_BACKUP_LIMIT);
+
+    await Promise.all(removable.map((name) => rm(resolveServerDataPath(`restore-backups/${name}`), { recursive: true, force: true })));
+    return removable.length;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

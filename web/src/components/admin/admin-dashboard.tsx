@@ -10,7 +10,7 @@ import { nanoid } from "nanoid";
 
 import { DEFAULT_MODEL_POINT_COST_KEY } from "@/constant/credits";
 import type { AuthSettings, PublicUser, SiteFriendLink, SiteSocialKey, SystemModelChannel, UserRole, UserStatus } from "@/lib/auth/store";
-import type { StoredGenerationLog } from "@/lib/server/generation-log-store";
+import type { GenerationAssetStats, StoredGenerationLog } from "@/lib/server/generation-log-store";
 import type { Prompt } from "@/services/api/prompts";
 
 type AdminDashboardProps = {
@@ -69,6 +69,9 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
     const [settingsLoading, setSettingsLoading] = useState(false);
     const [backupLoading, setBackupLoading] = useState(false);
     const [backupImporting, setBackupImporting] = useState(false);
+    const [assetStats, setAssetStats] = useState<GenerationAssetStats | null>(null);
+    const [assetStatsLoading, setAssetStatsLoading] = useState(false);
+    const [assetCleanupLoading, setAssetCleanupLoading] = useState(false);
     const [mailTestLoading, setMailTestLoading] = useState(false);
     const [mailTestTo, setMailTestTo] = useState("");
     const [fetchingModelId, setFetchingModelId] = useState("");
@@ -138,6 +141,11 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
         if (activeSection !== "prompts") return;
         void loadPrompts(promptPage, debouncedPromptSearch);
     }, [activeSection, promptPage, debouncedPromptSearch]);
+
+    useEffect(() => {
+        if (activeSection !== "overview") return;
+        void loadGenerationAssetStats();
+    }, [activeSection]);
 
     useEffect(() => {
         if (activeSection !== "logs") return;
@@ -214,6 +222,44 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                     message.error(error instanceof Error ? error.message : "导入数据库失败");
                 } finally {
                     setBackupImporting(false);
+                }
+            },
+        });
+    };
+
+    const loadGenerationAssetStats = async () => {
+        setAssetStatsLoading(true);
+        try {
+            const response = await fetch("/api/admin/generation-assets", { cache: "no-store" });
+            const payload = (await response.json().catch(() => null)) as { stats?: GenerationAssetStats; error?: string } | null;
+            if (!response.ok || !payload?.stats) throw new Error(payload?.error || "加载生成资源统计失败");
+            setAssetStats(payload.stats);
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "加载生成资源统计失败");
+        } finally {
+            setAssetStatsLoading(false);
+        }
+    };
+
+    const cleanupGenerationAssets = () => {
+        modal.confirm({
+            title: "清理未引用的本地生成资源？",
+            content: "只会删除后台生成日志已经不再引用的本地预览文件，不会删除日志仍在使用的结果，也不会处理远程图片或用户账号数据。",
+            okText: "清理",
+            cancelText: "取消",
+            okButtonProps: { danger: true },
+            onOk: async () => {
+                setAssetCleanupLoading(true);
+                try {
+                    const response = await fetch("/api/admin/generation-assets", { method: "DELETE" });
+                    const payload = (await response.json().catch(() => null)) as { deletedFiles?: number; deletedBytes?: number; stats?: GenerationAssetStats; error?: string } | null;
+                    if (!response.ok || !payload) throw new Error(payload?.error || "清理生成资源失败");
+                    if (payload.stats) setAssetStats(payload.stats);
+                    message.success(`已清理 ${payload.deletedFiles ?? 0} 个未引用文件，释放 ${formatBytes(payload.deletedBytes || 0)}`);
+                } catch (error) {
+                    message.error(error instanceof Error ? error.message : "清理生成资源失败");
+                } finally {
+                    setAssetCleanupLoading(false);
                 }
             },
         });
@@ -883,11 +929,12 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
 
                 {activeSection === "overview" ? (
                     <div className="space-y-5">
-                        <section className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-4">
+                        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
                             <Metric label="用户总数" value={stats.total} detail={`${stats.active} 个可用账号`} icon={<UsersRound className="size-5" />} tone="slate" />
                             <Metric label="管理员" value={stats.admins} detail={`${stats.disabled} 个账号禁用`} icon={<ShieldCheck className="size-5" />} tone="blue" />
                             <Metric label="通用接口" value={settingsSummary.enabledChannels} detail={`共 ${settingsSummary.totalChannels} 个渠道`} icon={<PlugZap className="size-5" />} tone="emerald" />
                             <Metric label="公共提示词" value={promptCount} detail={`${settingsSummary.models} 个模型已录入`} icon={<KeyRound className="size-5" />} tone="amber" />
+                            <Metric label="生成资源" value={assetStats ? assetStats.totalFiles : "-"} detail={assetStats ? `${formatBytes(assetStats.totalBytes)} 本地预览` : "统计加载中"} icon={<ImageIcon className="size-5" />} tone="cyan" />
                         </section>
                         <Panel>
                             <PanelHeader
@@ -920,6 +967,28 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                                 <div className="rounded-lg border border-stone-200 bg-stone-50/70 p-4 dark:border-stone-800 dark:bg-stone-900/40">
                                     导入会先把当前数据快照保存到 `.data/restore-backups`，再恢复备份里的 `.data/prompts.json` 与 `.data/generation-logs.json` 等内容。
                                 </div>
+                            </div>
+                        </Panel>
+                        <Panel>
+                            <PanelHeader
+                                title="生成资源清理"
+                                description="统计后台生成日志的本地预览资源，清理不再被日志引用的图片或视频文件，减少 .data 占用。"
+                                actions={
+                                    <div className="flex flex-wrap justify-end gap-2">
+                                        <Button loading={assetStatsLoading} icon={<RefreshCw className="size-4" />} onClick={() => void loadGenerationAssetStats()}>
+                                            刷新统计
+                                        </Button>
+                                        <Button danger disabled={!assetStats?.unreferencedFiles} loading={assetCleanupLoading} icon={<Trash2 className="size-4" />} onClick={cleanupGenerationAssets}>
+                                            清理未引用资源
+                                        </Button>
+                                    </div>
+                                }
+                            />
+                            <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-4 sm:p-5">
+                                <ResourceStat label="本地预览文件" value={assetStats ? `${assetStats.totalFiles} 个` : "-"} detail={assetStats ? formatBytes(assetStats.totalBytes) : "等待统计"} />
+                                <ResourceStat label="日志引用中" value={assetStats ? `${assetStats.referencedFiles} 个` : "-"} detail={assetStats ? formatBytes(assetStats.referencedBytes) : "等待统计"} />
+                                <ResourceStat label="未引用文件" value={assetStats ? `${assetStats.unreferencedFiles} 个` : "-"} detail={assetStats ? formatBytes(assetStats.unreferencedBytes) : "可安全清理"} />
+                                <ResourceStat label="丢失引用" value={assetStats ? `${assetStats.missingReferences} 个` : "-"} detail="日志记录存在但文件不存在" />
                             </div>
                         </Panel>
                     </div>
@@ -2014,7 +2083,7 @@ function LabeledControl({ label, children }: { label: string; children: ReactNod
     );
 }
 
-function Metric({ label, value, detail, icon, tone }: { label: string; value: number; detail: string; icon: ReactNode; tone: "slate" | "blue" | "emerald" | "amber" }) {
+function Metric({ label, value, detail, icon, tone }: { label: string; value: number | string; detail: string; icon: ReactNode; tone: "slate" | "blue" | "emerald" | "amber" | "cyan" }) {
     const toneClass = metricToneClass[tone];
     return (
         <div className="flex min-h-28 items-center justify-between rounded-lg border border-stone-200 bg-white p-4 shadow-sm shadow-stone-200/40 dark:border-stone-800 dark:bg-stone-950 dark:shadow-black/20">
@@ -2024,6 +2093,16 @@ function Metric({ label, value, detail, icon, tone }: { label: string; value: nu
                 <p className="mt-2 truncate text-xs text-stone-500 dark:text-stone-400">{detail}</p>
             </div>
             <div className={`flex size-10 shrink-0 items-center justify-center rounded-md ${toneClass}`}>{icon}</div>
+        </div>
+    );
+}
+
+function ResourceStat({ label, value, detail }: { label: string; value: string; detail: string }) {
+    return (
+        <div className="min-w-0 rounded-lg border border-stone-200 bg-stone-50/70 p-4 dark:border-stone-800 dark:bg-stone-900/40">
+            <div className="text-xs font-medium text-stone-500 dark:text-stone-400">{label}</div>
+            <div className="mt-2 truncate text-xl font-semibold text-stone-950 dark:text-stone-100">{value}</div>
+            <div className="mt-1 truncate text-xs text-stone-500 dark:text-stone-400">{detail}</div>
         </div>
     );
 }
@@ -2095,6 +2174,18 @@ function formatAdminLogDuration(value: number) {
     return `${(value / 1000).toFixed(2)}s`;
 }
 
+function formatBytes(value: number) {
+    if (!value) return "0 B";
+    const units = ["B", "KB", "MB", "GB"] as const;
+    let size = value;
+    let unitIndex = 0;
+    while (size >= 1024 && unitIndex < units.length - 1) {
+        size /= 1024;
+        unitIndex += 1;
+    }
+    return `${size >= 10 || unitIndex === 0 ? size.toFixed(0) : size.toFixed(1)} ${units[unitIndex]}`;
+}
+
 function generationKindLabel(value: string) {
     return value === "video" ? "视频" : "图片";
 }
@@ -2140,4 +2231,5 @@ const metricToneClass = {
     blue: "bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300",
     emerald: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300",
     amber: "bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300",
+    cyan: "bg-cyan-50 text-cyan-700 dark:bg-cyan-950/50 dark:text-cyan-300",
 };

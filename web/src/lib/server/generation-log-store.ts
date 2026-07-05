@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
 
 import { resolveServerDataPath } from "@/lib/server/data-dir";
@@ -69,6 +69,16 @@ export type GenerationLogListOptions = {
     userId?: string;
     start?: string;
     end?: string;
+};
+
+export type GenerationAssetStats = {
+    totalFiles: number;
+    totalBytes: number;
+    referencedFiles: number;
+    referencedBytes: number;
+    unreferencedFiles: number;
+    unreferencedBytes: number;
+    missingReferences: number;
 };
 
 type GenerationLogDatabase = {
@@ -161,6 +171,41 @@ export async function deleteGenerationLogs(ids: string[]) {
     });
 }
 
+export async function getGenerationAssetStats(): Promise<GenerationAssetStats> {
+    const db = await readGenerationLogDb();
+    const referenced = collectReferencedLocalAssetPaths(db);
+    const files = await listLocalAssetFiles();
+    const fileMap = new Map(files.map((file) => [file.path, file.bytes]));
+    const referencedExisting = Array.from(referenced).filter((filePath) => fileMap.has(filePath));
+    const referencedBytes = referencedExisting.reduce((total, filePath) => total + (fileMap.get(filePath) || 0), 0);
+    const unreferencedFiles = files.filter((file) => !referenced.has(file.path));
+
+    return {
+        totalFiles: files.length,
+        totalBytes: files.reduce((total, file) => total + file.bytes, 0),
+        referencedFiles: referencedExisting.length,
+        referencedBytes,
+        unreferencedFiles: unreferencedFiles.length,
+        unreferencedBytes: unreferencedFiles.reduce((total, file) => total + file.bytes, 0),
+        missingReferences: Array.from(referenced).filter((filePath) => !fileMap.has(filePath)).length,
+    };
+}
+
+export async function cleanupUnreferencedGenerationAssets() {
+    const db = await readGenerationLogDb();
+    const referenced = collectReferencedLocalAssetPaths(db);
+    const files = await listLocalAssetFiles();
+    const removable = files.filter((file) => !referenced.has(file.path));
+
+    await Promise.all(removable.map((file) => unlink(file.path).catch(() => undefined)));
+
+    return {
+        deletedFiles: removable.length,
+        deletedBytes: removable.reduce((total, file) => total + file.bytes, 0),
+        stats: await getGenerationAssetStats(),
+    };
+}
+
 export function sourceLabel(source: GenerationLogSource) {
     if (source === "image-workbench") return "生图工作台";
     if (source === "video-workbench") return "视频创作台";
@@ -228,6 +273,58 @@ async function deleteLocalAsset(url: string) {
     const root = resolve(ASSET_ROOT);
     if (filePath !== root && !filePath.startsWith(`${root}${sep}`)) return;
     await unlink(filePath).catch(() => undefined);
+}
+
+function collectReferencedLocalAssetPaths(db: GenerationLogDatabase) {
+    const root = resolve(ASSET_ROOT);
+    const paths = new Set<string>();
+    for (const log of db.logs) {
+        for (const asset of log.assets) {
+            const filePath = localAssetUrlToPath(asset.url);
+            if (filePath && filePath !== root && filePath.startsWith(`${root}${sep}`)) paths.add(filePath);
+        }
+    }
+    return paths;
+}
+
+function localAssetUrlToPath(url: string) {
+    if (!url.startsWith("/api/generation-log-assets/")) return "";
+    const relative = url.replace("/api/generation-log-assets/", "");
+    const filePath = resolve(ASSET_ROOT, relative);
+    const root = resolve(ASSET_ROOT);
+    return filePath !== root && filePath.startsWith(`${root}${sep}`) ? filePath : "";
+}
+
+async function listLocalAssetFiles() {
+    const root = resolve(ASSET_ROOT);
+    const files: Array<{ path: string; bytes: number }> = [];
+    await walkAssetDir(root, files);
+    return files;
+}
+
+async function walkAssetDir(dir: string, files: Array<{ path: string; bytes: number }>) {
+    let entries: Array<{ name: string; isDirectory(): boolean; isFile(): boolean }>;
+    try {
+        entries = await readdir(dir, { withFileTypes: true });
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+        throw error;
+    }
+
+    await Promise.all(
+        entries.map(async (entry) => {
+            const entryPath = resolve(dir, entry.name);
+            const root = resolve(ASSET_ROOT);
+            if (entryPath !== root && !entryPath.startsWith(`${root}${sep}`)) return;
+            if (entry.isDirectory()) {
+                await walkAssetDir(entryPath, files);
+                return;
+            }
+            if (!entry.isFile()) return;
+            const info = await stat(entryPath).catch(() => null);
+            if (info?.isFile()) files.push({ path: entryPath, bytes: info.size });
+        }),
+    );
 }
 
 async function readGenerationLogDb(): Promise<GenerationLogDatabase> {
