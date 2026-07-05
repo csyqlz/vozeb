@@ -841,8 +841,9 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
         {
             title: "提示词",
             dataIndex: "prompt",
+            width: 360,
             render: (_, record) => (
-                <div className="min-w-[240px] max-w-xl">
+                <div className="admin-generation-log-prompt-cell min-w-0">
                     <div className="truncate text-sm font-medium text-stone-900 dark:text-stone-100">{record.title}</div>
                     <div className="mt-1 line-clamp-2 text-xs leading-5 text-stone-500 dark:text-stone-400">{record.prompt || record.summary}</div>
                 </div>
@@ -850,10 +851,10 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
         },
         {
             title: "操作",
-            width: 150,
+            width: 176,
             fixed: "right",
             render: (_, record) => (
-                <Space size="small">
+                <div className="admin-generation-log-actions">
                     <Button size="small" type="text" icon={<Eye className="size-3.5" />} onClick={() => setViewingGenerationLog(record)}>
                         详情
                     </Button>
@@ -862,7 +863,7 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                             删除
                         </Button>
                     </Popconfirm>
-                </Space>
+                </div>
             ),
         },
     ];
@@ -1436,6 +1437,7 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                             </div>
                             <div className="hidden md:block">
                                 <Table
+                                    className="admin-generation-log-table"
                                     rowKey="id"
                                     columns={generationLogColumns}
                                     dataSource={generationLogs}
@@ -1452,8 +1454,9 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                                         selectedRowKeys: selectedGenerationLogIds,
                                         onChange: (keys) => setSelectedGenerationLogIds(keys.map(String)),
                                     }}
-                                    scroll={{ x: 1320 }}
+                                    scroll={{ x: 1500 }}
                                     size="middle"
+                                    tableLayout="fixed"
                                 />
                             </div>
                         </div>
@@ -1759,7 +1762,10 @@ function GenerationLogDetail({ log }: { log: StoredGenerationLog }) {
                     ) : (
                         <img className="max-h-[420px] w-full rounded-md bg-stone-100 object-contain dark:bg-stone-900" src={asset.url} alt="" referrerPolicy="no-referrer" />
                     )}
-                    <div className="mt-2 break-all text-xs text-stone-500 dark:text-stone-400">{asset.url}</div>
+                    <div className="mt-2 space-y-1 text-xs text-stone-500 dark:text-stone-400">
+                        <div className="font-medium text-stone-600 dark:text-stone-300">{generationLogAssetAddressLabel(asset.url)}</div>
+                        <div className="break-all">{asset.url}</div>
+                    </div>
                 </div>
             ) : null}
             <div>
@@ -1774,6 +1780,10 @@ function GenerationLogDetail({ log }: { log: StoredGenerationLog }) {
             ) : null}
         </div>
     );
+}
+
+function generationLogAssetAddressLabel(url: string) {
+    return url.startsWith("/api/generation-log-assets/") ? "服务器本地预览地址" : "远程结果地址";
 }
 
 function InfoBox({ label, value }: { label: string; value: string }) {
