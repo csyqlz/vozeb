@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
 
+import { getAuthSettings, type GenerationAssetStorageSettings, type UserRole } from "@/lib/auth/store";
 import { resolveServerDataPath } from "@/lib/server/data-dir";
 
 export type GenerationLogKind = "image" | "video";
@@ -11,6 +12,8 @@ export type GenerationLogStatus = "pending" | "success" | "failed";
 export type GenerationLogAsset = {
     type: GenerationLogKind;
     url: string;
+    remoteUrl?: string;
+    serverUrl?: string;
     mimeType?: string;
     width?: number;
     height?: number;
@@ -89,6 +92,9 @@ type GenerationLogDatabase = {
 const LOG_DATA_FILE = resolveServerDataPath("generation-logs.json");
 const ASSET_ROOT = resolveServerDataPath("generation-assets");
 const MAX_LOGS = 20000;
+const MAX_SERVER_IMAGE_BYTES = 20 * 1024 * 1024;
+const MAX_SERVER_VIDEO_BYTES = 300 * 1024 * 1024;
+const SERVER_ASSET_DOWNLOAD_TIMEOUT_MS = 15000;
 
 let mutationQueue = Promise.resolve();
 
@@ -127,7 +133,8 @@ export async function recordGenerationLog(input: GenerationLogInput) {
         const now = new Date().toISOString();
         const id = normalizeText(input.id, randomUUID(), 120);
         const existing = db.logs.find((log) => log.id === id);
-        const assets = await normalizeAssets(input.assets || []);
+        const settings = await getAuthSettings().catch(() => null);
+        const assets = await normalizeAssets(input.assets || [], settings?.generationAssetStorage);
         const createdAt = normalizeTime(input.createdAt, existing?.createdAt || now);
         const completedAt = input.status === "pending" ? undefined : normalizeTime(input.completedAt, now);
         const next: StoredGenerationLog = {
@@ -166,7 +173,7 @@ export async function deleteGenerationLogs(ids: string[]) {
         const idSet = new Set(normalizedIds);
         const removed = db.logs.filter((log) => idSet.has(log.id));
         db.logs = db.logs.filter((log) => !idSet.has(log.id));
-        await Promise.all(removed.flatMap((log) => log.assets.map((asset) => deleteLocalAsset(asset.url))));
+        await Promise.all(removed.flatMap((log) => log.assets.flatMap(localAssetUrls).map(deleteLocalAsset)));
         return { deleted: removed.length };
     });
 }
@@ -206,6 +213,19 @@ export async function cleanupUnreferencedGenerationAssets() {
     };
 }
 
+export async function canAccessGenerationAsset(userId: string, role: UserRole, url: string) {
+    if (role === "admin") return true;
+    const [db, settings] = await Promise.all([readGenerationLogDb(), getAuthSettings().catch(() => null)]);
+    return db.logs.some(
+        (log) =>
+            log.userId === userId &&
+            log.assets.some((asset) => {
+                const fallbackEnabled = shouldUseServerFallback(asset.type, settings?.generationAssetStorage);
+                return fallbackEnabled && localAssetUrls(asset).includes(url);
+            }),
+    );
+}
+
 export function sourceLabel(source: GenerationLogSource) {
     if (source === "image-workbench") return "生图工作台";
     if (source === "video-workbench") return "视频创作台";
@@ -229,24 +249,39 @@ export function isGenerationStatus(value?: string): value is GenerationLogStatus
     return value === "pending" || value === "success" || value === "failed";
 }
 
-async function normalizeAssets(assets: Array<Partial<GenerationLogAsset> & { url?: string }>) {
+async function normalizeAssets(assets: Array<Partial<GenerationLogAsset> & { url?: string }>, settings?: GenerationAssetStorageSettings) {
     const normalized: GenerationLogAsset[] = [];
     for (const asset of assets.slice(0, 6)) {
         const type = asset.type === "video" ? "video" : "image";
-        const url = (asset.url || "").trim();
-        if (!url || url.startsWith("blob:")) continue;
-        if (url.startsWith("data:")) {
-            const stored = await writeDataUrlAsset(url, type);
-            if (stored) normalized.push({ ...stored, width: toOptionalNumber(asset.width), height: toOptionalNumber(asset.height) });
-            continue;
+        const sourceUrl = (asset.url || "").trim();
+        const remoteUrl = normalizeRemoteUrl(asset.remoteUrl || (isRemoteAssetUrl(sourceUrl) ? sourceUrl : ""));
+        const existingServerUrl = normalizeServerAssetUrl(asset.serverUrl || (isServerAssetUrl(sourceUrl) ? sourceUrl : ""));
+        const shouldSaveServer = shouldDownloadAssetToServer(type, settings);
+        const serverFallbackEnabled = shouldUseServerFallback(type, settings);
+        let serverUrl = existingServerUrl;
+        let stored: GenerationLogAsset | null = null;
+
+        if (!sourceUrl || sourceUrl.startsWith("blob:")) {
+            if (!remoteUrl && !serverUrl) continue;
+        } else if (sourceUrl.startsWith("data:")) {
+            if (shouldSaveServer) stored = await writeDataUrlAsset(sourceUrl, type);
+        } else if (isRemoteAssetUrl(sourceUrl) && shouldSaveServer) {
+            stored = await writeRemoteAsset(sourceUrl, type);
         }
+
+        if (stored) serverUrl = stored.serverUrl || stored.url;
+        const accessUrl = remoteUrl || (serverFallbackEnabled ? serverUrl : "") || serverUrl || sourceUrl;
+        if (!accessUrl || accessUrl.startsWith("blob:") || accessUrl.startsWith("data:")) continue;
+
         normalized.push({
             type,
-            url: normalizeText(url, "", 4000),
-            mimeType: normalizeOptionalText(asset.mimeType, undefined, 120),
+            url: normalizeText(accessUrl, "", 4000),
+            remoteUrl: normalizeOptionalText(remoteUrl, undefined, 4000),
+            serverUrl: normalizeOptionalText(serverUrl, undefined, 4000),
+            mimeType: normalizeOptionalText(stored?.mimeType || asset.mimeType, undefined, 120),
             width: toOptionalNumber(asset.width),
             height: toOptionalNumber(asset.height),
-            bytes: toOptionalNumber(asset.bytes),
+            bytes: toOptionalNumber(stored?.bytes || asset.bytes),
         });
     }
     return normalized;
@@ -257,13 +292,69 @@ async function writeDataUrlAsset(dataUrl: string, type: GenerationLogKind): Prom
     if (!match) return null;
     const mimeType = match[1] || (type === "video" ? "video/mp4" : "image/png");
     const bytes = Buffer.from(match[2], "base64");
+    if (bytes.length > maxServerAssetBytes(type)) return null;
+    return writeAssetBytes(bytes, mimeType, type);
+}
+
+async function writeRemoteAsset(url: string, type: GenerationLogKind): Promise<GenerationLogAsset | null> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), SERVER_ASSET_DOWNLOAD_TIMEOUT_MS);
+    try {
+        const response = await fetch(url, { cache: "no-store", signal: controller.signal });
+        if (!response.ok || !response.body) return null;
+        const contentLength = Number(response.headers.get("content-length") || 0);
+        const maxBytes = maxServerAssetBytes(type);
+        if (contentLength > maxBytes) return null;
+        const bytes = Buffer.from(await response.arrayBuffer());
+        if (bytes.length > maxBytes) return null;
+        const mimeType = response.headers.get("content-type")?.split(";", 1)[0] || (type === "video" ? "video/mp4" : "image/png");
+        return writeAssetBytes(bytes, mimeType, type);
+    } catch {
+        return null;
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+async function writeAssetBytes(bytes: Buffer, mimeType: string, type: GenerationLogKind): Promise<GenerationLogAsset> {
     const folder = type === "video" ? "videos" : "images";
     const extension = extensionFromMime(mimeType, type);
     const fileName = `${randomUUID()}${extension}`;
     const filePath = resolve(ASSET_ROOT, folder, fileName);
     await mkdir(dirname(filePath), { recursive: true });
     await writeFile(filePath, bytes);
-    return { type, url: `/api/generation-log-assets/${folder}/${fileName}`, mimeType, bytes: bytes.length };
+    const serverUrl = `/api/generation-log-assets/${folder}/${fileName}`;
+    return { type, url: serverUrl, serverUrl, mimeType, bytes: bytes.length };
+}
+
+function shouldDownloadAssetToServer(type: GenerationLogKind, settings?: GenerationAssetStorageSettings) {
+    return type === "video" ? settings?.videoServerDownload === true : settings?.imageServerDownload === true;
+}
+
+function shouldUseServerFallback(type: GenerationLogKind, settings?: GenerationAssetStorageSettings) {
+    return type === "video" ? settings?.videoServerFallback !== false : settings?.imageServerFallback !== false;
+}
+
+function maxServerAssetBytes(type: GenerationLogKind) {
+    return type === "video" ? MAX_SERVER_VIDEO_BYTES : MAX_SERVER_IMAGE_BYTES;
+}
+
+function isRemoteAssetUrl(value: string) {
+    return /^https?:\/\//i.test(value);
+}
+
+function isServerAssetUrl(value: string) {
+    return value.startsWith("/api/generation-log-assets/");
+}
+
+function normalizeRemoteUrl(value: unknown) {
+    const text = normalizeOptionalText(value, undefined, 4000) || "";
+    return isRemoteAssetUrl(text) ? text : "";
+}
+
+function normalizeServerAssetUrl(value: unknown) {
+    const text = normalizeOptionalText(value, undefined, 4000) || "";
+    return isServerAssetUrl(text) ? text : "";
 }
 
 async function deleteLocalAsset(url: string) {
@@ -280,11 +371,17 @@ function collectReferencedLocalAssetPaths(db: GenerationLogDatabase) {
     const paths = new Set<string>();
     for (const log of db.logs) {
         for (const asset of log.assets) {
-            const filePath = localAssetUrlToPath(asset.url);
-            if (filePath && filePath !== root && filePath.startsWith(`${root}${sep}`)) paths.add(filePath);
+            for (const url of localAssetUrls(asset)) {
+                const filePath = localAssetUrlToPath(url);
+                if (filePath && filePath !== root && filePath.startsWith(`${root}${sep}`)) paths.add(filePath);
+            }
         }
     }
     return paths;
+}
+
+function localAssetUrls(asset: GenerationLogAsset) {
+    return [asset.url, asset.serverUrl].filter((url): url is string => Boolean(url && isServerAssetUrl(url)));
 }
 
 function localAssetUrlToPath(url: string) {
@@ -384,15 +481,35 @@ function normalizeStoredLog(log: Partial<StoredGenerationLog>): StoredGeneration
         failCount: normalizeNonNegativeInteger(log.failCount, status === "failed" ? 1 : 0),
         assets: Array.isArray(log.assets)
             ? log.assets
-                  .filter((asset) => asset?.url)
+                  .map(normalizeStoredAsset)
+                  .filter((asset): asset is GenerationLogAsset => Boolean(asset?.url))
                   .slice(0, 6)
-                  .map((asset) => ({ ...asset, type: asset.type === "video" ? "video" : "image" }))
             : [],
         taskId: normalizeOptionalText(log.taskId, undefined, 160),
         error: normalizeOptionalText(log.error, undefined, 1000),
         createdAt: normalizeTime(log.createdAt, new Date().toISOString()),
         updatedAt: normalizeTime(log.updatedAt, log.createdAt || new Date().toISOString()),
         completedAt: log.completedAt ? normalizeTime(log.completedAt, log.completedAt) : undefined,
+    };
+}
+
+function normalizeStoredAsset(asset: Partial<GenerationLogAsset> | undefined): GenerationLogAsset | null {
+    if (!asset) return null;
+    const type = asset.type === "video" ? "video" : "image";
+    const url = normalizeOptionalText(asset.url, undefined, 4000) || "";
+    const remoteUrl = normalizeRemoteUrl(asset.remoteUrl || (isRemoteAssetUrl(url) ? url : ""));
+    const serverUrl = normalizeServerAssetUrl(asset.serverUrl || (isServerAssetUrl(url) ? url : ""));
+    const accessUrl = remoteUrl || serverUrl || url;
+    if (!accessUrl) return null;
+    return {
+        type,
+        url: normalizeText(accessUrl, "", 4000),
+        remoteUrl: normalizeOptionalText(remoteUrl, undefined, 4000),
+        serverUrl: normalizeOptionalText(serverUrl, undefined, 4000),
+        mimeType: normalizeOptionalText(asset.mimeType, undefined, 120),
+        width: toOptionalNumber(asset.width),
+        height: toOptionalNumber(asset.height),
+        bytes: toOptionalNumber(asset.bytes),
     };
 }
 

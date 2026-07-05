@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 
 import { getCurrentUser } from "@/lib/auth/session";
 import { getServerDataDir } from "@/lib/server/data-dir";
+import { canAccessGenerationAsset } from "@/lib/server/generation-log-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,12 +16,13 @@ type RouteContext = {
 export async function GET(_request: Request, context: RouteContext) {
     const currentUser = await getCurrentUser();
     if (!currentUser) return NextResponse.json({ error: "请先登录" }, { status: 401 });
-    if (currentUser.role !== "admin") return NextResponse.json({ error: "需要管理员权限" }, { status: 403 });
 
     const { path } = await context.params;
     const root = resolve(getServerDataDir(), "generation-assets");
     const filePath = resolve(root, ...(path || []));
     if (!isInsideRoot(filePath, root)) return NextResponse.json({ error: "资源不存在" }, { status: 404 });
+    const assetUrl = `/api/generation-log-assets/${(path || []).join("/")}`;
+    if (!(await canAccessGenerationAsset(currentUser.id, currentUser.role, assetUrl))) return NextResponse.json({ error: "资源不存在" }, { status: 404 });
 
     try {
         const bytes = await readFile(filePath);

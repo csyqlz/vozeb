@@ -41,6 +41,13 @@ export type GenerationConcurrencySettings = {
     video: number;
 };
 
+export type GenerationAssetStorageSettings = {
+    imageServerFallback: boolean;
+    videoServerFallback: boolean;
+    imageServerDownload: boolean;
+    videoServerDownload: boolean;
+};
+
 export type SiteSettings = {
     title: string;
     logoUrl: string;
@@ -50,8 +57,21 @@ export type SiteSettings = {
     footerCopyright: string;
     termsUrl: string;
     privacyUrl: string;
+    homeShowcaseMode: SiteShowcaseMode;
+    homeShowcaseItems: SiteShowcaseItem[];
     friendLinks: SiteFriendLink[];
     socials: SiteSocialSettings;
+};
+
+export type SiteShowcaseMode = "random" | "custom";
+
+export type SiteShowcaseItem = {
+    id: string;
+    title: string;
+    coverUrl: string;
+    prompt: string;
+    tags: string[];
+    category: string;
 };
 
 export type SiteFriendLink = {
@@ -165,6 +185,7 @@ export type AuthSettings = {
     checkInRewardPoints: number;
     modelPointCosts: ModelPointCosts;
     generationConcurrency: GenerationConcurrencySettings;
+    generationAssetStorage: GenerationAssetStorageSettings;
     systemChannels: SystemModelChannel[];
     defaultModels: SystemDefaultModels;
 };
@@ -211,6 +232,8 @@ export const DEFAULT_SITE_SETTINGS: SiteSettings = {
     footerCopyright: "© 2026 VOZEB. All rights reserved.",
     termsUrl: "/terms",
     privacyUrl: "/privacy",
+    homeShowcaseMode: "random",
+    homeShowcaseItems: [],
     friendLinks: DEFAULT_SITE_FRIEND_LINKS,
     socials: DEFAULT_SITE_SOCIALS,
 };
@@ -234,6 +257,12 @@ const DEFAULT_SETTINGS: AuthSettings = {
     checkInRewardPoints: DEFAULT_CHECK_IN_REWARD_POINTS,
     modelPointCosts: {},
     generationConcurrency: { image: 4, video: 1 },
+    generationAssetStorage: {
+        imageServerFallback: true,
+        videoServerFallback: true,
+        imageServerDownload: false,
+        videoServerDownload: false,
+    },
     systemChannels: [],
     defaultModels: { imageModel: "", videoModel: "", textModel: "", audioModel: "" },
 };
@@ -767,6 +796,7 @@ function normalizeSettings(settings: AuthSettings): AuthSettings {
         checkInRewardPoints: normalizePoints(settings.checkInRewardPoints, legacyQuotaToPoints(legacySettings.checkInReward, DEFAULT_CHECK_IN_REWARD_POINTS)),
         modelPointCosts: normalizeModelPointCosts(settings.modelPointCosts),
         generationConcurrency: normalizeGenerationConcurrency(settings.generationConcurrency),
+        generationAssetStorage: normalizeGenerationAssetStorage(settings.generationAssetStorage),
         systemChannels: Array.isArray(settings.systemChannels) ? settings.systemChannels.map(normalizeSystemChannel).filter((channel) => channel.name || channel.baseUrl || channel.models.length) : [],
         defaultModels: {
             imageModel: settings.defaultModels?.imageModel || "",
@@ -774,6 +804,15 @@ function normalizeSettings(settings: AuthSettings): AuthSettings {
             textModel: settings.defaultModels?.textModel || "",
             audioModel: settings.defaultModels?.audioModel || "",
         },
+    };
+}
+
+function normalizeGenerationAssetStorage(settings: Partial<GenerationAssetStorageSettings> | undefined): GenerationAssetStorageSettings {
+    return {
+        imageServerFallback: settings?.imageServerFallback !== false,
+        videoServerFallback: settings?.videoServerFallback !== false,
+        imageServerDownload: settings?.imageServerDownload === true,
+        videoServerDownload: settings?.videoServerDownload === true,
     };
 }
 
@@ -796,9 +835,37 @@ function normalizeSiteSettings(settings: Partial<SiteSettings> | undefined): Sit
         footerCopyright: normalizeText(settings?.footerCopyright, DEFAULT_SITE_SETTINGS.footerCopyright, 120),
         termsUrl: normalizeLinkUrl(settings?.termsUrl, DEFAULT_SITE_SETTINGS.termsUrl),
         privacyUrl: normalizeLinkUrl(settings?.privacyUrl, DEFAULT_SITE_SETTINGS.privacyUrl),
+        homeShowcaseMode: settings?.homeShowcaseMode === "custom" ? "custom" : "random",
+        homeShowcaseItems: normalizeSiteShowcaseItems(settings?.homeShowcaseItems),
         friendLinks: normalizeSiteFriendLinks(settings?.friendLinks),
         socials: normalizeSiteSocials(settings?.socials),
     };
+}
+
+function normalizeSiteShowcaseItems(settings: unknown): SiteShowcaseItem[] {
+    if (!Array.isArray(settings)) return [];
+    return settings
+        .map((item, index) => {
+            const value = item as Partial<SiteShowcaseItem>;
+            const title = normalizeText(value.title, "", 80);
+            const prompt = normalizeText(value.prompt, "", 3000);
+            if (!title || !prompt) return null;
+            return {
+                id: normalizeText(value.id, `showcase-${index + 1}`, 80),
+                title,
+                coverUrl: normalizeLinkUrl(value.coverUrl, ""),
+                prompt,
+                tags: normalizeShowcaseTags(value.tags),
+                category: normalizeText(value.category, "首页展示", 40),
+            };
+        })
+        .filter((item): item is SiteShowcaseItem => Boolean(item))
+        .slice(0, 8);
+}
+
+function normalizeShowcaseTags(value: unknown): string[] {
+    const raw = Array.isArray(value) ? value : String(value || "").split(/[,，\n]/);
+    return Array.from(new Set(raw.map((tag) => String(tag || "").trim()).filter(Boolean))).slice(0, 4);
 }
 
 function normalizeSiteFriendLinks(settings: unknown): SiteFriendLink[] {

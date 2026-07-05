@@ -29,6 +29,8 @@ import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 type GeneratedVideo = {
     id: string;
     url: string;
+    remoteUrl?: string;
+    serverUrl?: string;
     storageKey: string;
     durationMs: number;
     width: number;
@@ -429,6 +431,8 @@ export default function VideoPage() {
                     const nextVideo: GeneratedVideo = {
                         id: nanoid(),
                         url: stored.url,
+                        remoteUrl: stored.remoteUrl,
+                        serverUrl: stored.serverUrl,
                         storageKey: stored.storageKey,
                         durationMs: Date.now() - log.createdAt,
                         width: stored.width || 1280,
@@ -439,7 +443,12 @@ export default function VideoPage() {
                     const nextLog = { ...(getLatestLog(log.id) || log), status: "成功" as const, durationMs: nextVideo.durationMs, video: nextVideo, task: undefined, error: undefined, resultDeleted: false };
                     if (activeLogIdRef.current === log.id) setResults([{ id: nextVideo.id, status: "success", video: nextVideo }]);
                     await saveLog(nextLog);
-                    void recordVideoGenerationLog(nextLog);
+                    void recordVideoGenerationLog(nextLog).then((asset) => {
+                        if (!asset || deletedResultLogIdsRef.current.has(log.id)) return;
+                        const latest = getLatestLog(log.id) || nextLog;
+                        if (!latest.video) return;
+                        void saveLog({ ...latest, video: { ...latest.video, remoteUrl: asset.remoteUrl || latest.video.remoteUrl, serverUrl: asset.serverUrl || latest.video.serverUrl } }, { refresh: false });
+                    });
                     message.success("视频已生成");
                     return;
                 }
@@ -1061,7 +1070,9 @@ async function readStoredLogs() {
 }
 
 async function recordVideoGenerationLog(log: GenerationLog) {
-    await recordGenerationLog({
+    const video = log.video;
+    const assetUrl = video?.remoteUrl || video?.serverUrl || (video?.url && !video.url.startsWith("blob:") ? video.url : "");
+    return recordGenerationLog({
         id: `video-workbench:${log.id}`,
         kind: "video",
         source: "video-workbench",
@@ -1074,27 +1085,31 @@ async function recordVideoGenerationLog(log: GenerationLog) {
         count: 1,
         successCount: log.status === "成功" ? 1 : 0,
         failCount: log.status === "失败" ? 1 : 0,
-        assets:
-            log.video?.url && !log.video.url.startsWith("blob:")
-                ? [
-                      {
-                          type: "video",
-                          url: log.video.url,
-                          mimeType: log.video.mimeType,
-                          width: log.video.width,
-                          height: log.video.height,
-                          bytes: log.video.bytes,
-                      },
-                  ]
-                : [],
+        assets: assetUrl
+            ? [
+                  {
+                      type: "video",
+                      url: assetUrl,
+                      remoteUrl: video?.remoteUrl,
+                      serverUrl: video?.serverUrl,
+                      mimeType: video?.mimeType,
+                      width: video?.width,
+                      height: video?.height,
+                      bytes: video?.bytes,
+                  },
+              ]
+            : [],
         error: log.error,
         createdAt: log.createdAt,
         completedAt: Date.now(),
-    }).catch(() => undefined);
+    })
+        .then((log) => log.assets[0])
+        .catch(() => undefined);
 }
 
 async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog> {
-    const video = log.video?.storageKey ? { ...log.video, url: await resolveMediaUrl(log.video.storageKey, log.video.url) } : log.video;
+    const videoFallback = generatedVideoFallback(log.video);
+    const video = log.video?.storageKey ? { ...log.video, url: await resolveMediaUrl(log.video.storageKey, videoFallback) } : log.video ? { ...log.video, url: videoFallback || log.video.url || "" } : undefined;
     const videoReferences = await Promise.all(
         (log.videoReferences || []).map(async (item) => ({
             ...item,
@@ -1135,6 +1150,11 @@ async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog>
         error: log.error,
         resultDeleted: Boolean(log.resultDeleted),
     };
+}
+
+function generatedVideoFallback(video?: Partial<GeneratedVideo>) {
+    const stableUrl = video?.url && !video.url.startsWith("blob:") ? video.url : "";
+    return stableUrl || video?.remoteUrl || video?.serverUrl || "";
 }
 
 function serializeLog(log: GenerationLog): GenerationLog {

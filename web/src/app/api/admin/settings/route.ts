@@ -31,6 +31,7 @@ export async function PATCH(request: Request) {
         if (typeof body.checkInRewardPoints === "number") patch.checkInRewardPoints = body.checkInRewardPoints;
         if (body.modelPointCosts && typeof body.modelPointCosts === "object") patch.modelPointCosts = body.modelPointCosts;
         if (body.generationConcurrency && typeof body.generationConcurrency === "object") patch.generationConcurrency = body.generationConcurrency;
+        if (body.generationAssetStorage && typeof body.generationAssetStorage === "object") patch.generationAssetStorage = body.generationAssetStorage;
         if (Array.isArray(body.systemChannels)) patch.systemChannels = body.systemChannels;
         if (body.defaultModels) patch.defaultModels = body.defaultModels;
         if (!Object.keys(patch).length) return NextResponse.json({ error: "没有可更新的设置" }, { status: 400 });

@@ -5,7 +5,7 @@ import { nanoid } from "nanoid";
 
 import { APP_STORAGE_NAME, LEGACY_APP_STORAGE_NAME } from "@/lib/storage-keys";
 
-export type UploadedFile = { url: string; storageKey: string; bytes: number; mimeType: string; width?: number; height?: number; durationMs?: number };
+export type UploadedFile = { url: string; storageKey: string; bytes: number; mimeType: string; width?: number; height?: number; durationMs?: number; remoteUrl?: string; serverUrl?: string };
 
 const store = localforage.createInstance({ name: APP_STORAGE_NAME, storeName: "media_files" });
 const legacyStore = localforage.createInstance({ name: LEGACY_APP_STORAGE_NAME, storeName: "media_files" });

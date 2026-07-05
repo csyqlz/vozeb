@@ -2,14 +2,39 @@
 
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { App, Button, Checkbox, DatePicker, Form, Input, InputNumber, Modal, Pagination, Popconfirm, Select, Space, Switch, Table, Tag } from "antd";
+import { App, Button, Checkbox, DatePicker, Form, Input, InputNumber, Modal, Pagination, Popconfirm, Segmented, Select, Space, Switch, Table, Tag } from "antd";
 import type { TableColumnsType } from "antd";
-import { Database, Download, Eye, Film, Gift, Globe2, Image as ImageIcon, KeyRound, Mail, PlugZap, Plus, RefreshCw, Save, Search, Send, ShieldCheck, SlidersHorizontal, Sparkles, Trash2, Upload, UserCog, UserRound, UsersRound } from "lucide-react";
+import {
+    Database,
+    Download,
+    ExternalLink,
+    Eye,
+    Film,
+    Gift,
+    Globe2,
+    Image as ImageIcon,
+    KeyRound,
+    Mail,
+    PlugZap,
+    Plus,
+    RefreshCw,
+    Save,
+    Search,
+    Send,
+    ShieldCheck,
+    SlidersHorizontal,
+    Sparkles,
+    Trash2,
+    Upload,
+    UserCog,
+    UserRound,
+    UsersRound,
+} from "lucide-react";
 import dayjs from "dayjs";
 import { nanoid } from "nanoid";
 
 import { DEFAULT_MODEL_POINT_COST_KEY } from "@/constant/credits";
-import type { AuthSettings, PublicUser, SiteFriendLink, SiteSocialKey, SystemModelChannel, UserRole, UserStatus } from "@/lib/auth/store";
+import type { AuthSettings, PublicUser, SiteFriendLink, SiteShowcaseItem, SiteSocialKey, SystemModelChannel, UserRole, UserStatus } from "@/lib/auth/store";
 import type { GenerationAssetStats, StoredGenerationLog } from "@/lib/server/generation-log-store";
 import type { Prompt } from "@/services/api/prompts";
 
@@ -557,6 +582,16 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
         }));
     };
 
+    const updateGenerationAssetStorage = (key: keyof AuthSettings["generationAssetStorage"], value: boolean) => {
+        setSettings((current) => ({
+            ...current,
+            generationAssetStorage: {
+                ...current.generationAssetStorage,
+                [key]: value,
+            },
+        }));
+    };
+
     const updateModelPointCost = (model: string, value: number | null) => {
         setSettings((current) => ({ ...current, modelPointCosts: { ...current.modelPointCosts, [model]: toNumberOrOne(value) } }));
     };
@@ -601,7 +636,7 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
         }
     };
 
-    const updateSiteSetting = (key: keyof Omit<AuthSettings["site"], "socials">, value: string) => {
+    const updateSiteSetting = <K extends keyof Omit<AuthSettings["site"], "socials">>(key: K, value: AuthSettings["site"][K]) => {
         setSettings((current) => ({ ...current, site: { ...current.site, [key]: value } }));
     };
 
@@ -664,6 +699,47 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
             site: {
                 ...current.site,
                 friendLinks: (current.site.friendLinks || []).filter((link) => link.id !== id),
+            },
+        }));
+    };
+
+    const addHomeShowcaseItem = () => {
+        setSettings((current) => ({
+            ...current,
+            site: {
+                ...current.site,
+                homeShowcaseMode: "custom",
+                homeShowcaseItems: [
+                    ...(current.site.homeShowcaseItems || []),
+                    {
+                        id: nanoid(),
+                        title: "首页展示提示词",
+                        coverUrl: "",
+                        prompt: "",
+                        tags: ["精选提示词"],
+                        category: "首页展示",
+                    },
+                ].slice(0, 8),
+            },
+        }));
+    };
+
+    const updateHomeShowcaseItem = (id: string, patch: Partial<SiteShowcaseItem>) => {
+        setSettings((current) => ({
+            ...current,
+            site: {
+                ...current.site,
+                homeShowcaseItems: (current.site.homeShowcaseItems || []).map((item) => (item.id === id ? { ...item, ...patch } : item)),
+            },
+        }));
+    };
+
+    const deleteHomeShowcaseItem = (id: string) => {
+        setSettings((current) => ({
+            ...current,
+            site: {
+                ...current.site,
+                homeShowcaseItems: (current.site.homeShowcaseItems || []).filter((item) => item.id !== id),
             },
         }));
     };
@@ -882,7 +958,7 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
         {
             title: "结果",
             width: 100,
-            render: (_, record) => <GenerationLogAssetPreview log={record} />,
+            render: (_, record) => <GenerationLogAssetPreview log={record} settings={settings.generationAssetStorage} />,
         },
         {
             title: "提示词",
@@ -1043,6 +1119,86 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                                 </div>
 
                                 <div className="rounded-lg border border-stone-200 bg-stone-50/70 p-4 dark:border-stone-800 dark:bg-stone-900/40">
+                                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                        <div>
+                                            <SectionTitle icon={<Sparkles className="size-4" />} title="首页提示词展示" />
+                                            <div className="mt-1 text-xs leading-5 text-stone-500 dark:text-stone-400">控制首页“沉淀每一次好结果”区域。随机模式会从公共提示词库抽取，自定义模式优先展示下方内容。</div>
+                                        </div>
+                                        <div className="w-full sm:w-[272px] sm:shrink-0">
+                                            <Segmented
+                                                block
+                                                size="small"
+                                                className="w-full [&_.ant-segmented-group]:!flex [&_.ant-segmented-item]:!min-w-0 [&_.ant-segmented-item]:!flex-1 [&_.ant-segmented-item-label]:!px-2 [&_.ant-segmented-item-label]:!text-center"
+                                                value={settings.site.homeShowcaseMode || "random"}
+                                                onChange={(value) => updateSiteSetting("homeShowcaseMode", value as AuthSettings["site"]["homeShowcaseMode"])}
+                                                options={[
+                                                    { label: "随机提示词", value: "random" },
+                                                    { label: "后台自定义", value: "custom" },
+                                                ]}
+                                            />
+                                        </div>
+                                    </div>
+
+                                    {settings.site.homeShowcaseMode === "custom" ? (
+                                        <div className="mt-5 space-y-3">
+                                            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                                                <div className="text-xs text-stone-500 dark:text-stone-400">建议至少填写 4 条，封面 URL 可留空，首页会自动使用渐变占位。</div>
+                                                <Button icon={<Plus className="size-4" />} disabled={(settings.site.homeShowcaseItems || []).length >= 8} onClick={addHomeShowcaseItem}>
+                                                    添加展示
+                                                </Button>
+                                            </div>
+                                            <div className="grid gap-3">
+                                                {(settings.site.homeShowcaseItems || []).map((item, index) => (
+                                                    <div key={item.id} className="grid gap-3 rounded-lg border border-stone-200 bg-white p-3 dark:border-stone-800 dark:bg-stone-950/60 md:grid-cols-[168px_minmax(0,1fr)]">
+                                                        <div className="overflow-hidden rounded-lg border border-stone-200 bg-stone-100 dark:border-stone-800 dark:bg-stone-900">
+                                                            {item.coverUrl ? (
+                                                                <img src={item.coverUrl} alt="" className="aspect-[4/3] w-full object-cover" referrerPolicy="no-referrer" />
+                                                            ) : (
+                                                                <div className="flex aspect-[4/3] items-center justify-center bg-[linear-gradient(135deg,#f8fafc,#dff5ff_45%,#111827)] text-xs text-stone-500 dark:bg-[linear-gradient(135deg,#0f172a,#164e63_45%,#020617)] dark:text-stone-300">
+                                                                    无封面
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                        <div className="min-w-0 space-y-3">
+                                                            <div className="flex items-center justify-between gap-3">
+                                                                <div className="text-sm font-semibold text-stone-950 dark:text-stone-100">展示 {index + 1}</div>
+                                                                <Button size="small" danger icon={<Trash2 className="size-3.5" />} aria-label="删除首页展示" title="删除首页展示" onClick={() => deleteHomeShowcaseItem(item.id)} />
+                                                            </div>
+                                                            <div className="grid gap-3 md:grid-cols-2">
+                                                                <Input value={item.title} maxLength={80} placeholder="展示标题" onChange={(event) => updateHomeShowcaseItem(item.id, { title: event.target.value })} />
+                                                                <Input value={item.category} maxLength={40} placeholder="分类，例如 首页展示" onChange={(event) => updateHomeShowcaseItem(item.id, { category: event.target.value })} />
+                                                            </div>
+                                                            <Input value={item.coverUrl} maxLength={2000} placeholder="封面 URL，可留空" onChange={(event) => updateHomeShowcaseItem(item.id, { coverUrl: event.target.value })} />
+                                                            <Input
+                                                                value={(item.tags || []).join("，")}
+                                                                maxLength={120}
+                                                                placeholder="标签，用逗号分隔"
+                                                                onChange={(event) =>
+                                                                    updateHomeShowcaseItem(item.id, {
+                                                                        tags: event.target.value
+                                                                            .split(/[,，]/)
+                                                                            .map((tag) => tag.trim())
+                                                                            .filter(Boolean),
+                                                                    })
+                                                                }
+                                                            />
+                                                            <Input.TextArea value={item.prompt} rows={3} maxLength={3000} placeholder="提示词内容" onChange={(event) => updateHomeShowcaseItem(item.id, { prompt: event.target.value })} />
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                                {!settings.site.homeShowcaseItems?.length ? (
+                                                    <div className="rounded-md border border-dashed border-stone-200 px-3 py-8 text-center text-sm text-stone-500 dark:border-stone-800">暂无自定义展示，点击“添加展示”开始配置。</div>
+                                                ) : null}
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="mt-5 rounded-lg border border-dashed border-stone-200 bg-white px-4 py-5 text-sm leading-6 text-stone-600 dark:border-stone-800 dark:bg-stone-950/60 dark:text-stone-300">
+                                            当前使用公共提示词库随机展示。首页接近该区域时才会加载随机内容，避免拖慢首屏。
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="rounded-lg border border-stone-200 bg-stone-50/70 p-4 dark:border-stone-800 dark:bg-stone-900/40">
                                     <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                                         <SectionTitle icon={<Globe2 className="size-4" />} title="首页收尾与社交媒体" />
                                         <span className="text-xs font-medium text-stone-500 dark:text-stone-400">独立控制首页尾页展示</span>
@@ -1114,7 +1270,7 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                                 </div>
                             </div>
 
-                            <div className="space-y-4">
+                            <div className="space-y-4 lg:sticky lg:top-4 lg:self-start">
                                 <div className="rounded-lg border border-stone-200 bg-white p-4 shadow-sm shadow-stone-200/40 dark:border-stone-800 dark:bg-stone-950 dark:shadow-black/20">
                                     <SectionTitle icon={<ImageIcon className="size-4" />} title="前台预览" />
                                     <div className="mt-5 rounded-lg border border-stone-200 bg-white p-5 text-stone-950 shadow-sm shadow-stone-200/60 dark:border-white/10 dark:bg-stone-950 dark:text-white dark:shadow-black/20">
@@ -1131,9 +1287,8 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                                         </div>
                                     </div>
                                 </div>
-                                <div className="rounded-lg border border-cyan-200/60 bg-cyan-50 p-4 text-sm leading-6 text-cyan-900 dark:border-cyan-900/50 dark:bg-cyan-950/30 dark:text-cyan-100">
-                                    保存后首页、顶部导航、浏览器标题、Open Graph 和 favicon 会同步读取这里的配置。
-                                </div>
+                                <SiteSettingStatus site={settings.site} />
+                                <SiteShowcasePreview site={settings.site} onAdd={addHomeShowcaseItem} />
                             </div>
                         </div>
                     </Panel>
@@ -1145,12 +1300,37 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                             title="系统设置"
                             description="账号、额度和系统接口分区管理。"
                             actions={
-                                <div className="flex flex-wrap gap-2 text-xs text-stone-500 dark:text-stone-400">
-                                    <Tag className="m-0">
-                                        接口 {settingsSummary.enabledChannels}/{settingsSummary.totalChannels}
-                                    </Tag>
-                                    <Tag className="m-0">模型 {settingsSummary.models}</Tag>
-                                    <Tag className="m-0">{settings.registrationEnabled ? "注册开放" : "注册关闭"}</Tag>
+                                <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:justify-end">
+                                    <div className="flex flex-wrap gap-2 text-xs text-stone-500 dark:text-stone-400">
+                                        <Tag className="m-0">
+                                            接口 {settingsSummary.enabledChannels}/{settingsSummary.totalChannels}
+                                        </Tag>
+                                        <Tag className="m-0">模型 {settingsSummary.models}</Tag>
+                                        <Tag className="m-0">{settings.registrationEnabled ? "注册开放" : "注册关闭"}</Tag>
+                                    </div>
+                                    <Button
+                                        className="w-full sm:w-auto"
+                                        type="primary"
+                                        loading={settingsLoading}
+                                        icon={<Save className="size-4" />}
+                                        onClick={() =>
+                                            saveSettings(
+                                                {
+                                                    registrationEnabled: settings.registrationEnabled,
+                                                    emailRegistrationEnabled: settings.emailRegistrationEnabled,
+                                                    mail: settings.mail,
+                                                    defaultPoints: settings.defaultPoints,
+                                                    checkInRewardPoints: settings.checkInRewardPoints,
+                                                    modelPointCosts: settings.modelPointCosts,
+                                                    generationConcurrency: settings.generationConcurrency,
+                                                    generationAssetStorage: settings.generationAssetStorage,
+                                                },
+                                                "账号、邮箱、积分、并发与兜底设置已保存",
+                                            )
+                                        }
+                                    >
+                                        保存系统设置
+                                    </Button>
                                 </div>
                             }
                         />
@@ -1223,6 +1403,7 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                                 </div>
                                 <div className="space-y-4">
                                     <GenerationConcurrencyPanel settings={settings} onChange={updateGenerationConcurrency} />
+                                    <GenerationAssetStoragePanel settings={settings} onChange={updateGenerationAssetStorage} />
                                     <QuotaRuleTable
                                         settings={settings}
                                         customModel={customPointModel}
@@ -1235,31 +1416,6 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                                     />
                                 </div>
                             </div>
-                            <div className="flex justify-stretch border-b border-stone-200 pb-5 sm:justify-end dark:border-stone-800">
-                                <Button
-                                    className="w-full sm:w-auto"
-                                    type="primary"
-                                    loading={settingsLoading}
-                                    icon={<Save className="size-4" />}
-                                    onClick={() =>
-                                        saveSettings(
-                                            {
-                                                registrationEnabled: settings.registrationEnabled,
-                                                emailRegistrationEnabled: settings.emailRegistrationEnabled,
-                                                mail: settings.mail,
-                                                defaultPoints: settings.defaultPoints,
-                                                checkInRewardPoints: settings.checkInRewardPoints,
-                                                modelPointCosts: settings.modelPointCosts,
-                                                generationConcurrency: settings.generationConcurrency,
-                                            },
-                                            "账号、邮箱、积分与并发设置已保存",
-                                        )
-                                    }
-                                >
-                                    保存账号、邮箱、积分与并发
-                                </Button>
-                            </div>
-
                             <div className="flex flex-col gap-3 rounded-lg border border-stone-200 bg-stone-50/70 p-3 xl:flex-row xl:items-center xl:justify-between dark:border-stone-800 dark:bg-stone-900/40">
                                 <SettingInlineToggle
                                     title="允许用户自配接口"
@@ -1498,6 +1654,7 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                                         log={log}
                                         selected={selectedGenerationLogIds.includes(log.id)}
                                         onSelectedChange={(checked) => setSelectedGenerationLogIds((ids) => (checked ? Array.from(new Set([...ids, log.id])) : ids.filter((id) => id !== log.id)))}
+                                        settings={settings.generationAssetStorage}
                                         onView={() => setViewingGenerationLog(log)}
                                         onDelete={() => void deleteGenerationLogsByIds([log.id])}
                                     />
@@ -1738,7 +1895,7 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                 </Form>
             </Modal>
             <Modal title="生成日志详情" open={Boolean(viewingGenerationLog)} footer={null} onCancel={() => setViewingGenerationLog(null)} width={860}>
-                {viewingGenerationLog ? <GenerationLogDetail log={viewingGenerationLog} /> : null}
+                {viewingGenerationLog ? <GenerationLogDetail log={viewingGenerationLog} settings={settings.generationAssetStorage} /> : null}
             </Modal>
             <input
                 ref={logoInputRef}
@@ -1758,9 +1915,10 @@ function Panel({ children }: { children: ReactNode }) {
     return <section className="min-w-0 overflow-hidden rounded-lg border border-stone-200 bg-white shadow-sm shadow-stone-200/40 dark:border-stone-800 dark:bg-stone-950 dark:shadow-black/20">{children}</section>;
 }
 
-function GenerationLogAssetPreview({ log }: { log: StoredGenerationLog }) {
+function GenerationLogAssetPreview({ log, settings }: { log: StoredGenerationLog; settings: AuthSettings["generationAssetStorage"] }) {
     const asset = log.assets[0];
-    if (!asset?.url) {
+    const assetUrl = asset ? generationLogAssetAccessUrl(asset, settings) : "";
+    if (!assetUrl) {
         return (
             <div className="flex size-12 items-center justify-center rounded-lg border border-stone-200 bg-stone-100 text-stone-400 dark:border-stone-800 dark:bg-stone-900">
                 {log.kind === "video" ? <Film className="size-4" /> : <ImageIcon className="size-4" />}
@@ -1768,12 +1926,26 @@ function GenerationLogAssetPreview({ log }: { log: StoredGenerationLog }) {
         );
     }
     if (asset.type === "video") {
-        return <video className="size-12 rounded-lg border border-stone-200 bg-stone-100 object-cover dark:border-stone-800 dark:bg-stone-900" src={asset.url} muted playsInline preload="metadata" />;
+        return <video className="size-12 rounded-lg border border-stone-200 bg-stone-100 object-cover dark:border-stone-800 dark:bg-stone-900" src={assetUrl} muted playsInline preload="metadata" />;
     }
-    return <img className="size-12 rounded-lg border border-stone-200 bg-stone-100 object-cover dark:border-stone-800 dark:bg-stone-900" src={asset.url} alt="" loading="lazy" referrerPolicy="no-referrer" />;
+    return <img className="size-12 rounded-lg border border-stone-200 bg-stone-100 object-cover dark:border-stone-800 dark:bg-stone-900" src={assetUrl} alt="" loading="lazy" referrerPolicy="no-referrer" />;
 }
 
-function GenerationLogMobileCard({ log, selected, onSelectedChange, onView, onDelete }: { log: StoredGenerationLog; selected: boolean; onSelectedChange: (checked: boolean) => void; onView: () => void; onDelete: () => void }) {
+function GenerationLogMobileCard({
+    log,
+    selected,
+    settings,
+    onSelectedChange,
+    onView,
+    onDelete,
+}: {
+    log: StoredGenerationLog;
+    selected: boolean;
+    settings: AuthSettings["generationAssetStorage"];
+    onSelectedChange: (checked: boolean) => void;
+    onView: () => void;
+    onDelete: () => void;
+}) {
     return (
         <div className="rounded-lg border border-stone-200 bg-white p-3 dark:border-stone-800 dark:bg-stone-950">
             <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] gap-3">
@@ -1794,7 +1966,7 @@ function GenerationLogMobileCard({ log, selected, onSelectedChange, onView, onDe
                         <span>{formatAdminLogDuration(log.durationMs)}</span>
                     </div>
                 </div>
-                <GenerationLogAssetPreview log={log} />
+                <GenerationLogAssetPreview log={log} settings={settings} />
             </div>
             <div className="mt-3 flex justify-end gap-2">
                 <Button size="small" icon={<Eye className="size-3.5" />} onClick={onView}>
@@ -1810,8 +1982,9 @@ function GenerationLogMobileCard({ log, selected, onSelectedChange, onView, onDe
     );
 }
 
-function GenerationLogDetail({ log }: { log: StoredGenerationLog }) {
+function GenerationLogDetail({ log, settings }: { log: StoredGenerationLog; settings: AuthSettings["generationAssetStorage"] }) {
     const asset = log.assets[0];
+    const assetUrl = asset ? generationLogAssetAccessUrl(asset, settings) : "";
     return (
         <div className="space-y-4">
             <div className="grid gap-3 sm:grid-cols-2">
@@ -1824,17 +1997,14 @@ function GenerationLogDetail({ log }: { log: StoredGenerationLog }) {
                 <InfoBox label="模型" value={log.model || "-"} />
                 <InfoBox label="数量" value={`成功 ${log.successCount} / 失败 ${log.failCount} / 共 ${log.count}`} />
             </div>
-            {asset?.url ? (
+            {assetUrl ? (
                 <div className="rounded-lg border border-stone-200 p-3 dark:border-stone-800">
                     {asset.type === "video" ? (
-                        <video className="max-h-[420px] w-full rounded-md bg-black object-contain" src={asset.url} controls playsInline />
+                        <video className="max-h-[420px] w-full rounded-md bg-black object-contain" src={assetUrl} controls playsInline />
                     ) : (
-                        <img className="max-h-[420px] w-full rounded-md bg-stone-100 object-contain dark:bg-stone-900" src={asset.url} alt="" referrerPolicy="no-referrer" />
+                        <img className="max-h-[420px] w-full rounded-md bg-stone-100 object-contain dark:bg-stone-900" src={assetUrl} alt="" referrerPolicy="no-referrer" />
                     )}
-                    <div className="mt-2 space-y-1 text-xs text-stone-500 dark:text-stone-400">
-                        <div className="font-medium text-stone-600 dark:text-stone-300">{generationLogAssetAddressLabel(asset.url)}</div>
-                        <div className="break-all">{asset.url}</div>
-                    </div>
+                    <GenerationAssetAddressList asset={asset} assetUrl={assetUrl} />
                 </div>
             ) : null}
             <div>
@@ -1851,8 +2021,46 @@ function GenerationLogDetail({ log }: { log: StoredGenerationLog }) {
     );
 }
 
+function GenerationAssetAddressList({ asset, assetUrl }: { asset: StoredGenerationLog["assets"][number]; assetUrl: string }) {
+    const rows = [
+        { key: "active", label: generationLogAssetAddressLabel(assetUrl), url: assetUrl },
+        asset.remoteUrl && asset.remoteUrl !== assetUrl ? { key: "remote", label: "远程结果地址", url: asset.remoteUrl } : null,
+        asset.serverUrl && asset.serverUrl !== assetUrl ? { key: "server", label: "服务器兜底地址", url: asset.serverUrl } : null,
+    ].filter((item): item is { key: string; label: string; url: string } => Boolean(item?.url));
+
+    if (!rows.length) return null;
+    return (
+        <div className="mt-3 rounded-lg border border-stone-200 bg-stone-50/80 p-3 dark:border-stone-800 dark:bg-stone-900/70">
+            <div className="mb-2 flex items-center justify-between gap-3">
+                <div className="text-xs font-semibold uppercase tracking-wide text-stone-500 dark:text-stone-400">访问地址</div>
+                <Tag className="m-0" color={asset.type === "video" ? "purple" : "blue"}>
+                    {asset.type === "video" ? "视频" : "图片"}
+                </Tag>
+            </div>
+            <div className="space-y-2">
+                {rows.map((row) => (
+                    <div key={row.key} className="flex min-w-0 flex-col gap-2 rounded-md border border-stone-200 bg-white px-3 py-2 dark:border-stone-800 dark:bg-stone-950/70 sm:flex-row sm:items-center">
+                        <div className="shrink-0 text-xs font-medium text-stone-700 dark:text-stone-200">{row.label}</div>
+                        <div className="min-w-0 flex-1 truncate text-xs text-stone-500 dark:text-stone-400" title={row.url}>
+                            {row.url}
+                        </div>
+                        <Button size="small" href={row.url} target="_blank" icon={<ExternalLink className="size-3.5" />}>
+                            打开
+                        </Button>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+}
+
 function generationLogAssetAddressLabel(url: string) {
-    return url.startsWith("/api/generation-log-assets/") ? "服务器本地预览地址" : "远程结果地址";
+    return url.startsWith("/api/generation-log-assets/") ? "服务器兜底地址" : "远程结果地址";
+}
+
+function generationLogAssetAccessUrl(asset: StoredGenerationLog["assets"][number], settings: AuthSettings["generationAssetStorage"]) {
+    void settings;
+    return asset.remoteUrl || (asset.url && !asset.url.startsWith("/api/generation-log-assets/") ? asset.url : "") || asset.serverUrl || (asset.url?.startsWith("/api/generation-log-assets/") ? asset.url : "");
 }
 
 function InfoBox({ label, value }: { label: string; value: string }) {
@@ -1953,6 +2161,49 @@ function GenerationConcurrencyPanel({ settings, onChange }: { settings: AuthSett
                 </LabeledControl>
             </div>
             <div className="mt-2 text-xs leading-5 text-stone-500 dark:text-stone-400">限制的是单个用户自己的并发任务，不是全站共享上限。</div>
+        </div>
+    );
+}
+
+function GenerationAssetStoragePanel({ settings, onChange }: { settings: AuthSettings; onChange: (key: keyof AuthSettings["generationAssetStorage"], value: boolean) => void }) {
+    return (
+        <div className="rounded-lg border border-stone-200 bg-stone-50/70 p-4 dark:border-stone-800 dark:bg-stone-900/40">
+            <SectionTitle icon={<Download className="size-4" />} title="生成结果服务器兜底" />
+            <div className="mt-4 grid gap-4">
+                <SettingToggle
+                    title="图片服务器兜底"
+                    description="本地缓存和远程结果地址不可用时，允许使用服务器保存的图片副本。"
+                    checked={settings.generationAssetStorage.imageServerFallback}
+                    checkedChildren="开启"
+                    unCheckedChildren="关闭"
+                    onChange={(checked) => onChange("imageServerFallback", checked)}
+                />
+                <SettingToggle
+                    title="图片下载到服务器"
+                    description="开启后，新生成图片会尝试保存服务器副本；关闭后优先只保留本地缓存和远程结果地址。"
+                    checked={settings.generationAssetStorage.imageServerDownload}
+                    checkedChildren="保存"
+                    unCheckedChildren="不保存"
+                    onChange={(checked) => onChange("imageServerDownload", checked)}
+                />
+                <SettingToggle
+                    title="视频服务器兜底"
+                    description="本地缓存和远程结果地址不可用时，允许使用服务器保存的视频副本。"
+                    checked={settings.generationAssetStorage.videoServerFallback}
+                    checkedChildren="开启"
+                    unCheckedChildren="关闭"
+                    onChange={(checked) => onChange("videoServerFallback", checked)}
+                />
+                <SettingToggle
+                    title="视频下载到服务器"
+                    description="开启后，新生成视频会在有远程地址时尝试保存服务器副本；大文件会自动跳过。"
+                    checked={settings.generationAssetStorage.videoServerDownload}
+                    checkedChildren="保存"
+                    unCheckedChildren="不保存"
+                    onChange={(checked) => onChange("videoServerDownload", checked)}
+                />
+            </div>
+            <div className="mt-2 text-xs leading-5 text-stone-500 dark:text-stone-400">用户端展示顺序为本地缓存、远程结果地址、服务器副本；后台日志没有用户本地缓存时，会按远程结果地址、服务器副本展示。</div>
         </div>
     );
 }
@@ -2117,6 +2368,113 @@ function SiteLogoPreview({ logoUrl }: { logoUrl: string }) {
                 WebkitMask: "url(/logo.svg) center / 78% no-repeat",
             }}
         />
+    );
+}
+
+function SiteSettingStatus({ site }: { site: AuthSettings["site"] }) {
+    const enabledSocialCount = siteSocialItems.filter((item) => site.socials[item.key]?.enabled && site.socials[item.key]?.url.trim()).length;
+    const enabledFriendLinkCount = (site.friendLinks || []).filter((link) => link.enabled && link.label.trim() && link.url.trim()).length;
+    const validShowcaseCount = (site.homeShowcaseItems || []).filter((item) => item.title.trim() && item.prompt.trim()).length;
+    const isCustom = site.homeShowcaseMode === "custom";
+    const seoReady = Boolean((site.seoTitle || site.title).trim() && site.seoDescription.trim());
+
+    return (
+        <div className="rounded-lg border border-stone-200 bg-white p-4 shadow-sm shadow-stone-200/40 dark:border-stone-800 dark:bg-stone-950 dark:shadow-black/20">
+            <SectionTitle icon={<RefreshCw className="size-4" />} title="同步状态" />
+            <div className="mt-4 grid grid-cols-2 gap-2">
+                <SiteStatusChip label="Logo" value={site.logoUrl.trim() ? "已设置" : "默认"} active={Boolean(site.logoUrl.trim())} />
+                <SiteStatusChip label="SEO" value={seoReady ? "完整" : "待补充"} active={seoReady} />
+                <SiteStatusChip label="社交媒体" value={`${enabledSocialCount} 项`} active={enabledSocialCount > 0} />
+                <SiteStatusChip label="友情链接" value={`${enabledFriendLinkCount} 条`} active={enabledFriendLinkCount > 0} />
+            </div>
+            <div className="mt-3 rounded-lg border border-stone-200 bg-stone-50/70 p-3 dark:border-stone-800 dark:bg-stone-900/50">
+                <div className="flex items-center justify-between gap-3 text-sm">
+                    <span className="font-semibold text-stone-950 dark:text-stone-100">首页提示词</span>
+                    <span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-xs font-medium text-stone-700 ring-1 ring-stone-200 dark:bg-stone-950 dark:text-stone-200 dark:ring-stone-800">
+                        {isCustom ? `自定义 ${validShowcaseCount}/8` : "随机提示词库"}
+                    </span>
+                </div>
+                <div className="mt-2 text-xs leading-5 text-stone-500 dark:text-stone-400">保存后会同步到首页导航、浏览器标题、Open Graph、favicon 和首页展示区域。</div>
+            </div>
+        </div>
+    );
+}
+
+function SiteStatusChip({ label, value, active }: { label: string; value: string; active: boolean }) {
+    return (
+        <div className="min-w-0 rounded-lg border border-stone-200 bg-stone-50/80 p-3 dark:border-stone-800 dark:bg-stone-900/50">
+            <div className="text-xs text-stone-500 dark:text-stone-400">{label}</div>
+            <div className={`mt-1 truncate text-sm font-semibold ${active ? "text-stone-950 dark:text-stone-100" : "text-stone-500 dark:text-stone-400"}`}>{value}</div>
+        </div>
+    );
+}
+
+function SiteShowcasePreview({ site, onAdd }: { site: AuthSettings["site"]; onAdd: () => void }) {
+    const items = site.homeShowcaseItems || [];
+    const customItems = items.filter((item) => item.title.trim() && item.prompt.trim()).slice(0, 3);
+    const isCustom = site.homeShowcaseMode === "custom";
+
+    return (
+        <div className="rounded-lg border border-stone-200 bg-white p-4 shadow-sm shadow-stone-200/40 dark:border-stone-800 dark:bg-stone-950 dark:shadow-black/20">
+            <div className="flex items-start justify-between gap-3">
+                <div>
+                    <SectionTitle icon={<Sparkles className="size-4" />} title="首页展示预览" />
+                    <div className="mt-2 text-xs leading-5 text-stone-500 dark:text-stone-400">{isCustom ? `后台自定义：${items.length}/8 条` : "随机展示公共提示词库内容"}</div>
+                </div>
+                <Tag className="m-0" color={isCustom ? "geekblue" : "green"}>
+                    {isCustom ? "自定义" : "随机"}
+                </Tag>
+            </div>
+
+            {isCustom ? (
+                customItems.length ? (
+                    <div className="mt-4 space-y-2">
+                        {customItems.map((item) => (
+                            <div key={item.id} className="grid grid-cols-[64px_minmax(0,1fr)] gap-3 rounded-lg border border-stone-200 bg-stone-50/70 p-2 dark:border-stone-800 dark:bg-stone-900/60">
+                                {item.coverUrl ? (
+                                    <img src={item.coverUrl} alt="" className="aspect-square rounded-md object-cover" referrerPolicy="no-referrer" />
+                                ) : (
+                                    <div className="aspect-square rounded-md bg-[linear-gradient(135deg,#f8fafc,#dff5ff_45%,#111827)] dark:bg-[linear-gradient(135deg,#0f172a,#164e63_45%,#020617)]" />
+                                )}
+                                <div className="min-w-0">
+                                    <div className="truncate text-sm font-semibold text-stone-950 dark:text-stone-100">{item.title}</div>
+                                    <div className="mt-1 line-clamp-2 text-xs leading-5 text-stone-500 dark:text-stone-400">{item.prompt}</div>
+                                </div>
+                            </div>
+                        ))}
+                        {items.length > customItems.length ? <div className="text-center text-xs text-stone-500 dark:text-stone-400">还有 {items.length - customItems.length} 条会在首页继续展示</div> : null}
+                    </div>
+                ) : (
+                    <div className="mt-4 rounded-lg border border-dashed border-stone-200 bg-stone-50/70 px-3 py-6 text-center dark:border-stone-800 dark:bg-stone-900/50">
+                        <div className="text-sm font-medium text-stone-700 dark:text-stone-200">还没有可展示内容</div>
+                        <div className="mt-1 text-xs text-stone-500 dark:text-stone-400">填写标题和提示词后会出现在首页。</div>
+                        <Button className="mt-3" size="small" icon={<Plus className="size-3.5" />} onClick={onAdd}>
+                            添加展示
+                        </Button>
+                    </div>
+                )
+            ) : (
+                <div className="mt-4 space-y-3">
+                    <div className="grid grid-cols-3 gap-2">
+                        {Array.from({ length: 3 }).map((_, index) => (
+                            <div key={index} className="overflow-hidden rounded-lg border border-stone-200 bg-white shadow-sm dark:border-stone-800 dark:bg-stone-900">
+                                <div className="h-16 bg-[linear-gradient(145deg,#f8fafc,#e0f2fe_48%,#0f172a)] dark:bg-[linear-gradient(145deg,#0f172a,#164e63_48%,#020617)]" />
+                                <div className="space-y-1 p-2">
+                                    <div className="h-1.5 rounded-full bg-stone-200 dark:bg-stone-700" />
+                                    <div className="h-1.5 w-2/3 rounded-full bg-stone-100 dark:bg-stone-800" />
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                    <div className="rounded-lg border border-dashed border-stone-200 bg-stone-50/70 p-3 dark:border-stone-800 dark:bg-stone-900/50">
+                        <div className="text-sm font-semibold text-stone-950 dark:text-stone-100">从公共提示词库随机抽取</div>
+                        <div className="mt-1 text-xs leading-5 text-stone-500 dark:text-stone-400">首页接近展示区时才加载，既能换内容，也不会拖慢首屏。</div>
+                    </div>
+                </div>
+            )}
+
+            <div className="mt-3 text-xs leading-5 text-stone-500 dark:text-stone-400">首页展示区会懒加载，保持首屏打开速度。</div>
+        </div>
     );
 }
 

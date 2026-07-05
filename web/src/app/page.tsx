@@ -25,6 +25,8 @@ type SessionPayload = {
             footerCopyright?: string;
             termsUrl?: string;
             privacyUrl?: string;
+            homeShowcaseMode?: SiteShowcaseMode;
+            homeShowcaseItems?: SiteShowcaseItem[];
             friendLinks?: SiteFriendLink[];
             socials?: SiteSocialSettings;
         };
@@ -35,6 +37,8 @@ type SiteSocialKey = "email" | "telegram" | "x" | "instagram";
 
 type SiteSocialSettings = Record<SiteSocialKey, { enabled: boolean; label: string; url: string }>;
 type SiteFriendLink = { id: string; label: string; url: string; enabled: boolean };
+type SiteShowcaseMode = "random" | "custom";
+type SiteShowcaseItem = { id: string; title: string; coverUrl: string; prompt: string; tags: string[]; category: string };
 
 const featureItems = [
     { icon: Layers3, title: "无限画布", text: "把图片、文字、视频、音频与配置节点串成连续创作流。" },
@@ -55,6 +59,8 @@ const defaultSite: {
     footerCopyright: string;
     termsUrl: string;
     privacyUrl: string;
+    homeShowcaseMode: SiteShowcaseMode;
+    homeShowcaseItems: SiteShowcaseItem[];
     friendLinks: SiteFriendLink[];
     socials: SiteSocialSettings;
 } = {
@@ -64,6 +70,8 @@ const defaultSite: {
     footerCopyright: "© 2026 VOZEB. All rights reserved.",
     termsUrl: "/terms",
     privacyUrl: "/privacy",
+    homeShowcaseMode: "random",
+    homeShowcaseItems: [],
     friendLinks: [
         { id: "vozeb-home", label: "VOZEB", url: "https://www.vozeb.com/", enabled: true },
         { id: "linux-do", label: "Linux.do", url: "https://linux.do/", enabled: true },
@@ -146,25 +154,43 @@ export default function HomePage() {
     const theme = useThemeStore((state) => state.theme);
     const setTheme = useThemeStore((state) => state.setTheme);
     const friendLinks = (site.friendLinks || []).filter((link) => link.enabled && link.url);
+    const previewItems = promptShowcase.filter((item) => item.coverUrl);
 
     useEffect(() => {
         void fetch("/api/auth/session")
             .then((response) => response.json() as Promise<SessionPayload>)
             .then((data) => {
                 if (data.user) setUser(data.user);
-                if (data.settings?.site) setSite((current) => ({ ...current, ...data.settings!.site }));
+                if (data.settings?.site) {
+                    const nextSite = { ...defaultSite, ...data.settings.site };
+                    setSite(nextSite);
+                    if (nextSite.homeShowcaseMode === "custom") {
+                        showcaseRequestedRef.current = true;
+                        setPromptShowcase(siteShowcaseItemsToPrompts(nextSite.homeShowcaseItems));
+                    }
+                }
             })
             .catch(() => undefined);
     }, [setUser]);
 
     useEffect(() => {
+        if (site.homeShowcaseMode === "custom") {
+            showcaseRequestedRef.current = true;
+            setPromptShowcase(siteShowcaseItemsToPrompts(site.homeShowcaseItems));
+            return;
+        }
+
+        showcaseRequestedRef.current = false;
+        let cancelled = false;
         let idleHandle: number | undefined;
         let timeoutHandle: ReturnType<typeof globalThis.setTimeout> | undefined;
         let observer: IntersectionObserver | undefined;
 
         const loadShowcase = () => {
-            void fetchPrompts({ pageSize: 8 })
-                .then((data) => setPromptShowcase(data.items))
+            void fetchPrompts({ pageSize: 8, random: true })
+                .then((data) => {
+                    if (!cancelled) setPromptShowcase(data.items);
+                })
                 .catch(() => undefined);
         };
 
@@ -198,11 +224,12 @@ export default function HomePage() {
         observer.observe(section);
 
         return () => {
+            cancelled = true;
             observer?.disconnect();
             if (idleHandle && "cancelIdleCallback" in window) window.cancelIdleCallback(idleHandle);
             if (timeoutHandle) globalThis.clearTimeout(timeoutHandle);
         };
-    }, []);
+    }, [site.homeShowcaseItems, site.homeShowcaseMode]);
 
     return (
         <main className="animated-dot-bg relative h-dvh overflow-x-hidden overflow-y-auto bg-background text-stone-950 dark:text-stone-100">
@@ -311,7 +338,13 @@ export default function HomePage() {
                                 key={item.id}
                                 type="button"
                                 onClick={() => {
-                                    setPreviewIndex(index);
+                                    if (!item.coverUrl) return;
+                                    setPreviewIndex(
+                                        Math.max(
+                                            0,
+                                            previewItems.findIndex((preview) => preview.id === item.id),
+                                        ),
+                                    );
                                     setPreviewOpen(true);
                                 }}
                                 className={cn(
@@ -320,7 +353,11 @@ export default function HomePage() {
                                     index === 3 && "md:col-span-2",
                                 )}
                             >
-                                <img src={item.coverUrl} alt={item.title} className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]" loading="lazy" referrerPolicy="no-referrer" />
+                                {item.coverUrl ? (
+                                    <img src={item.coverUrl} alt={item.title} className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]" loading="lazy" referrerPolicy="no-referrer" />
+                                ) : (
+                                    <div className="h-full w-full bg-[linear-gradient(135deg,#f8fafc,#dff5ff_45%,#111827)] transition duration-500 group-hover:scale-[1.03] dark:bg-[linear-gradient(135deg,#0f172a,#164e63_45%,#020617)]" />
+                                )}
                                 <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 via-black/35 to-transparent p-4 text-white">
                                     <div className="mb-2 flex flex-wrap gap-1.5">
                                         {item.tags.slice(0, 2).map((tag) => (
@@ -402,7 +439,7 @@ export default function HomePage() {
                 }}
             >
                 <div className="hidden">
-                    {promptShowcase.map((item) => (
+                    {previewItems.map((item) => (
                         <Image key={item.id} src={item.coverUrl} alt={item.title} />
                     ))}
                 </div>
@@ -436,6 +473,25 @@ export default function HomePage() {
             </Modal>
         </main>
     );
+}
+
+function siteShowcaseItemsToPrompts(items: SiteShowcaseItem[] = []): Prompt[] {
+    const now = new Date().toISOString();
+    return items
+        .filter((item) => item.title.trim() && item.prompt.trim())
+        .slice(0, 8)
+        .map((item) => ({
+            id: item.id,
+            scope: "library" as const,
+            title: item.title,
+            coverUrl: item.coverUrl,
+            prompt: item.prompt,
+            tags: item.tags || [],
+            category: item.category || "首页展示",
+            preview: item.prompt,
+            createdAt: now,
+            updatedAt: now,
+        }));
 }
 
 function SiteLogo({ logoUrl, className }: { logoUrl: string; className: string }) {

@@ -100,8 +100,14 @@ async function runImageTask(task: ImageTask, origin: string, cookie: string) {
     updateImageTask(task.id, { status: "running" });
     try {
         const result = task.config.apiFormat === "gemini" ? await runGeminiImageTask(task, origin, cookie) : await runOpenAiImageTask(task, origin, cookie);
-        updateImageTask(task.id, { status: "success", result: { dataUrl: result.dataUrl }, pointsRemaining: result.pointsRemaining });
-        await writeImageGenerationLog(task, "success", result.dataUrl, Date.now() - task.createdAt);
+        const log = await writeImageGenerationLog(task, "success", result.dataUrl, Date.now() - task.createdAt);
+        const asset = log.assets[0];
+        const settings = await getAuthSettings().catch(() => null);
+        updateImageTask(task.id, {
+            status: "success",
+            result: { dataUrl: result.dataUrl, remoteUrl: asset?.remoteUrl, serverUrl: settings?.generationAssetStorage.imageServerFallback !== false ? asset?.serverUrl : undefined },
+            pointsRemaining: result.pointsRemaining,
+        });
     } catch (error) {
         const message = toSafeGenerationErrorMessage(error, "图片生成失败");
         updateImageTask(task.id, { status: "error", error: message });
@@ -110,7 +116,7 @@ async function runImageTask(task: ImageTask, origin: string, cookie: string) {
 }
 
 async function writeImageGenerationLog(task: ImageTask, status: "success" | "failed", resultUrl: string, durationMs: number, error?: string) {
-    await recordGenerationLog({
+    return recordGenerationLog({
         id: `image-task:${task.id}`,
         taskId: task.id,
         userId: task.userId,

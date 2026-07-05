@@ -75,6 +75,7 @@ export function serializePublicSettings(settings: AuthSettings) {
         checkInRewardPoints: settings.checkInRewardPoints,
         modelPointCosts: settings.modelPointCosts,
         generationConcurrency: settings.generationConcurrency,
+        generationAssetStorage: settings.generationAssetStorage,
         defaultModels: settings.defaultModels,
         systemChannels: settings.systemChannels
             .filter((channel) => channel.enabled)

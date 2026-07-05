@@ -27,6 +27,7 @@ type GeneratedImage = {
     id: string;
     dataUrl: string;
     remoteUrl?: string;
+    serverUrl?: string;
     storageKey?: string;
     slotIndex?: number;
     durationMs: number;
@@ -338,12 +339,13 @@ export default function ImagePage() {
 
     async function completeGenerationTask(logId: string, resultId: string, index: number, snapshot: GenerationSnapshot, pendingTask: PendingImageTask, controller?: AbortController) {
         const result = await waitForImageGenerationTask(snapshot.config, { id: pendingTask.taskId, kind: pendingTask.kind, model: pendingTask.model }, { signal: controller?.signal });
-        const imageMeta = await normalizeGeneratedImage(result.dataUrl);
+        const imageMeta = await normalizeGeneratedImage(result.dataUrl, result.remoteUrl, result.serverUrl);
         const durationMs = Date.now() - pendingTask.startedAt;
         const nextImage: GeneratedImage = {
             id: resultId,
             dataUrl: imageMeta.url,
             remoteUrl: imageMeta.remoteUrl,
+            serverUrl: imageMeta.serverUrl,
             storageKey: imageMeta.storageKey,
             slotIndex: index,
             durationMs,
@@ -1164,7 +1166,7 @@ async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog>
     const images = await Promise.all(
         (log.images || []).map(async (item) => ({
             ...item,
-            dataUrl: await hydrateGeneratedImageUrl(item.storageKey, item.dataUrl, item.remoteUrl),
+            dataUrl: await hydrateGeneratedImageUrl(item.storageKey, item.dataUrl, item.remoteUrl, item.serverUrl),
         })),
     );
     const config = normalizeLogConfig(log);
@@ -1206,31 +1208,40 @@ function serializeLog(log: GenerationLog): GenerationLog {
     };
 }
 
-async function hydrateGeneratedImageUrl(storageKey?: string, fallback = "", remoteFallback = "") {
-    if (!storageKey && isStableImageUrl(fallback)) return fallback;
-    return resolveImageUrl(storageKey, fallback || remoteFallback);
+async function hydrateGeneratedImageUrl(storageKey?: string, fallback = "", remoteFallback = "", serverFallback = "") {
+    const stableFallback = isStableImageUrl(fallback) ? fallback : "";
+    const fallbackUrl = stableFallback || remoteFallback || serverFallback;
+    if (!storageKey) return fallbackUrl || fallback;
+    return resolveImageUrl(storageKey, fallbackUrl);
 }
 
-async function normalizeGeneratedImage(url: string) {
-    if (isRemoteImageUrl(url)) {
+async function normalizeGeneratedImage(url: string, remoteFallback = "", serverFallback = "") {
+    const remoteUrl = isRemoteImageUrl(remoteFallback) ? remoteFallback : isRemoteImageUrl(url) ? url : "";
+    const serverUrl = isServerImageUrl(serverFallback) ? serverFallback : isServerImageUrl(url) ? url : "";
+    const candidates = Array.from(new Set([url, remoteUrl, serverUrl].filter(Boolean)));
+    for (const candidate of candidates) {
         try {
-            const stored = await uploadImage(url);
-            return { url: stored.url, remoteUrl: url, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType, storageKey: stored.storageKey };
+            const stored = await uploadImage(candidate);
+            return { url: stored.url, remoteUrl: remoteUrl || undefined, serverUrl: serverUrl || undefined, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType, storageKey: stored.storageKey };
         } catch {
-            const meta = await readImageMeta(url);
-            return { url, remoteUrl: url, width: meta.width, height: meta.height, bytes: 0, mimeType: meta.mimeType, storageKey: undefined };
+            // Try the next fallback source.
         }
     }
-    const stored = await uploadImage(url);
-    return { url: stored.url, remoteUrl: undefined, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType, storageKey: stored.storageKey };
+    const fallbackUrl = remoteUrl || serverUrl || url;
+    const meta = await readImageMeta(fallbackUrl);
+    return { url: fallbackUrl, remoteUrl: remoteUrl || undefined, serverUrl: serverUrl || undefined, width: meta.width, height: meta.height, bytes: 0, mimeType: meta.mimeType, storageKey: undefined };
 }
 
 function isStableImageUrl(value?: string) {
-    return Boolean(value && (value.startsWith("data:") || /^https?:\/\//i.test(value)));
+    return Boolean(value && (value.startsWith("data:") || /^https?:\/\//i.test(value) || isServerImageUrl(value)));
 }
 
 function isRemoteImageUrl(value: string) {
     return /^https?:\/\//i.test(value);
+}
+
+function isServerImageUrl(value: string) {
+    return value.startsWith("/api/generation-log-assets/");
 }
 
 function resultsFromLog(log: GenerationLog): GenerationResult[] {

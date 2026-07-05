@@ -9,6 +9,8 @@ import { APP_STORAGE_NAME, LEGACY_APP_STORAGE_NAME } from "@/lib/storage-keys";
 export type UploadedImage = {
     url: string;
     storageKey: string;
+    remoteUrl?: string;
+    serverUrl?: string;
     width: number;
     height: number;
     bytes: number;

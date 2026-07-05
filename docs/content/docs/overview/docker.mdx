@@ -123,5 +123,9 @@ docker compose -f docker-compose.local.yml up -d --build
 
 - 用户与后台设置：`/app/web/.data/auth.json`
 - 管理员公共提示词：`/app/web/.data/prompts.json`
+- 生成日志：`/app/web/.data/generation-logs.json`
+- 生成结果服务器副本：`/app/web/.data/generation-assets`
 
-本仓库的 `docker-compose.yml` 和 `docker-compose.local.yml` 默认把命名卷 `vozeb-data` 挂载到 `/app/web/.data`，并通过 `VOZEB_DATA_DIR=/app/web/.data` 固定服务端数据库目录。正常执行 `docker compose pull && docker compose up -d` 更新镜像不会删除已有用户；只有执行 `docker compose down -v`、手动删除 Docker volume，或使用没有挂载 `.data` 的旧容器才可能导致数据丢失。
+本仓库的 `docker-compose.yml` 和 `docker-compose.local.yml` 默认把命名卷 `vozeb-data` 挂载到 `/app/web/.data`，并通过 `VOZEB_DATA_DIR=/app/web/.data` 固定服务端数据库目录。正常执行 `docker compose pull && docker compose up -d` 更新镜像不会删除已有用户、后台设置、生成日志或服务器副本；只有执行 `docker compose down -v`、手动删除 Docker volume，或使用没有挂载 `.data` 的旧容器才可能导致数据丢失。
+
+图片和视频结果的服务器副本是否保存，由管理员后台系统设置里的“图片/视频下载到服务器”分别控制；是否允许普通用户把这些副本作为最后兜底访问，则由“图片/视频服务器兜底”分别控制。关闭下载保存不会删除旧副本，旧副本可以在后台生成资源统计中清理。

@@ -5,6 +5,8 @@ export type GenerationLogStatus = "pending" | "success" | "failed";
 export type GenerationLogAssetInput = {
     type: GenerationLogKind;
     url?: string;
+    remoteUrl?: string;
+    serverUrl?: string;
     mimeType?: string;
     width?: number;
     height?: number;
@@ -31,6 +33,11 @@ export type GenerationLogRecordInput = {
     completedAt?: string | number;
 };
 
+export type GenerationLogRecordResponse = {
+    id: string;
+    assets: Array<GenerationLogAssetInput & { url: string }>;
+};
+
 export async function recordGenerationLog(input: GenerationLogRecordInput) {
     const response = await fetch("/api/generation-logs", {
         method: "POST",
@@ -38,6 +45,9 @@ export async function recordGenerationLog(input: GenerationLogRecordInput) {
         body: JSON.stringify(input),
     });
     if (!response.ok) throw new Error(await readError(response));
+    const payload = (await response.json()) as { log?: GenerationLogRecordResponse };
+    if (!payload.log) throw new Error("记录生成日志失败");
+    return payload.log;
 }
 
 function readError(response: Response) {

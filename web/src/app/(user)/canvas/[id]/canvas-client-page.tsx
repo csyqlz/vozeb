@@ -433,7 +433,7 @@ function VozebCanvasPage() {
     const completeVideoTask = useCallback(async (nodeId: string, generationConfig: AiConfig, task: NonNullable<CanvasNodeMetadata["videoTask"]>, controller: AbortController, prompt?: string) => {
         const video = await storeGeneratedVideo(await waitForVideoGenerationTask(generationConfig, task, { signal: controller.signal }));
         const finalPrompt = prompt || "";
-        void recordGenerationLog({
+        const loggedAssetPromise = recordGenerationLog({
             id: `canvas-video:${task.id || nodeId}`,
             taskId: task.id,
             kind: "video",
@@ -448,11 +448,13 @@ function VozebCanvasPage() {
             successCount: 1,
             failCount: 0,
             assets:
-                video.url && !video.url.startsWith("blob:")
+                video.remoteUrl || video.serverUrl || (video.url && !video.url.startsWith("blob:") ? video.url : "")
                     ? [
                           {
                               type: "video",
-                              url: video.url,
+                              url: video.remoteUrl || video.serverUrl || video.url,
+                              remoteUrl: video.remoteUrl,
+                              serverUrl: video.serverUrl,
                               mimeType: video.mimeType,
                               width: video.width,
                               height: video.height,
@@ -461,7 +463,9 @@ function VozebCanvasPage() {
                       ]
                     : [],
             completedAt: Date.now(),
-        }).catch(() => undefined);
+        })
+            .then((log) => log.assets[0])
+            .catch(() => undefined);
         setNodes((prev) =>
             prev.map((node) => {
                 if (node.id !== nodeId) return node;
@@ -487,11 +491,28 @@ function VozebCanvasPage() {
                 };
             }),
         );
+        void loggedAssetPromise.then((asset) => {
+            if (!asset?.serverUrl && !asset?.remoteUrl) return;
+            setNodes((prev) =>
+                prev.map((node) =>
+                    node.id === nodeId
+                        ? {
+                              ...node,
+                              metadata: {
+                                  ...node.metadata,
+                                  remoteUrl: asset.remoteUrl || node.metadata?.remoteUrl,
+                                  serverUrl: asset.serverUrl || node.metadata?.serverUrl,
+                              },
+                          }
+                        : node,
+                ),
+            );
+        });
     }, []);
 
     const completeImageTask = useCallback(async (nodeId: string, generationConfig: AiConfig, task: NonNullable<CanvasNodeMetadata["imageTask"]> | ImageGenerationTask, controller: AbortController, prompt?: string) => {
         const image = await waitForImageGenerationTask(generationConfig, task, { signal: controller.signal });
-        const uploaded = await uploadImage(image.dataUrl);
+        const uploaded = await uploadGeneratedCanvasImage(image.dataUrl, image.remoteUrl, image.serverUrl);
         setNodes((prev) => {
             const target = prev.find((node) => node.id === nodeId);
             const batchRootId = target?.metadata?.batchRootId;
@@ -3368,12 +3389,47 @@ function audioExtension(mimeType?: string) {
     return "mp3";
 }
 
+async function uploadGeneratedCanvasImage(url: string, remoteFallback = "", serverFallback = ""): Promise<UploadedImage> {
+    const remoteUrl = isRemoteGeneratedUrl(remoteFallback) ? remoteFallback : isRemoteGeneratedUrl(url) ? url : "";
+    const serverUrl = isServerGeneratedUrl(serverFallback) ? serverFallback : isServerGeneratedUrl(url) ? url : "";
+    const candidates = Array.from(new Set([url, remoteUrl, serverUrl].filter(Boolean)));
+    for (const candidate of candidates) {
+        try {
+            return { ...(await uploadImage(candidate)), remoteUrl: remoteUrl || undefined, serverUrl: serverUrl || undefined };
+        } catch {
+            // Try the next fallback source.
+        }
+    }
+    const fallbackUrl = remoteUrl || serverUrl || url;
+    const meta = await readImageMeta(fallbackUrl);
+    return { url: fallbackUrl, storageKey: "", remoteUrl: remoteUrl || undefined, serverUrl: serverUrl || undefined, width: meta.width, height: meta.height, bytes: 0, mimeType: meta.mimeType };
+}
+
 function imageMetadata(image: UploadedImage): CanvasNodeMetadata {
-    return { content: image.url, storageKey: image.storageKey, status: "success", naturalWidth: image.width, naturalHeight: image.height, bytes: image.bytes, mimeType: image.mimeType };
+    return { content: image.url, storageKey: image.storageKey, remoteUrl: image.remoteUrl, serverUrl: image.serverUrl, status: "success", naturalWidth: image.width, naturalHeight: image.height, bytes: image.bytes, mimeType: image.mimeType };
+}
+
+function isRemoteGeneratedUrl(value: string) {
+    return /^https?:\/\//i.test(value);
+}
+
+function isServerGeneratedUrl(value: string) {
+    return value.startsWith("/api/generation-log-assets/");
 }
 
 function videoMetadata(video: UploadedFile): CanvasNodeMetadata {
-    return { content: video.url, storageKey: video.storageKey, status: "success", naturalWidth: video.width, naturalHeight: video.height, bytes: video.bytes, mimeType: video.mimeType || "video/mp4", durationMs: video.durationMs };
+    return {
+        content: video.url,
+        storageKey: video.storageKey,
+        remoteUrl: video.remoteUrl,
+        serverUrl: video.serverUrl,
+        status: "success",
+        naturalWidth: video.width,
+        naturalHeight: video.height,
+        bytes: video.bytes,
+        mimeType: video.mimeType || "video/mp4",
+        durationMs: video.durationMs,
+    };
 }
 
 function audioMetadata(audio: UploadedFile): CanvasNodeMetadata {
@@ -3429,13 +3485,23 @@ async function hydrateCanvasImages(nodes: CanvasNodeData[]) {
     return Promise.all(
         nodes.map(async (node) => {
             const content = node.metadata?.content;
-            if ((node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio) && node.metadata?.storageKey) return { ...node, metadata: { ...node.metadata, content: await resolveMediaUrl(node.metadata.storageKey, content) } };
-            if (node.type !== CanvasNodeType.Image || !content) return node;
-            if (node.metadata?.storageKey) return { ...node, metadata: { ...node.metadata, content: await resolveImageUrl(node.metadata.storageKey, content) } };
-            if (!content.startsWith("data:image/")) return node;
-            return { ...node, metadata: { ...node.metadata, ...imageMetadata(await uploadImage(content)) } };
+            const fallbackContent = stableGeneratedContent(content) || node.metadata?.remoteUrl || node.metadata?.serverUrl || "";
+            if ((node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio) && node.metadata?.storageKey) return { ...node, metadata: { ...node.metadata, content: await resolveMediaUrl(node.metadata.storageKey, fallbackContent) } };
+            if ((node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio) && content?.startsWith("blob:") && fallbackContent) return { ...node, metadata: { ...node.metadata, content: fallbackContent } };
+            if ((node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio) && !content && fallbackContent) return { ...node, metadata: { ...node.metadata, content: fallbackContent } };
+            if (node.type !== CanvasNodeType.Image || !fallbackContent) return node;
+            if (node.metadata?.storageKey) return { ...node, metadata: { ...node.metadata, content: await resolveImageUrl(node.metadata.storageKey, fallbackContent) } };
+            if (content?.startsWith("blob:") && fallbackContent) return { ...node, metadata: { ...node.metadata, content: fallbackContent } };
+            if (!content && fallbackContent) return { ...node, metadata: { ...node.metadata, content: fallbackContent } };
+            const contentValue = content || "";
+            if (!contentValue.startsWith("data:image/")) return node;
+            return { ...node, metadata: { ...node.metadata, ...imageMetadata(await uploadImage(contentValue)) } };
         }),
     );
+}
+
+function stableGeneratedContent(value?: string) {
+    return value && !value.startsWith("blob:") ? value : "";
 }
 
 async function hydrateAssistantImages(sessions: CanvasAssistantSession[]) {

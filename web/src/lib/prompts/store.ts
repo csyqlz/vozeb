@@ -55,6 +55,7 @@ type PromptListOptions = {
     keyword?: string;
     tags?: string[];
     category?: string;
+    random?: boolean;
     page?: number;
     pageSize?: number;
 };
@@ -78,7 +79,7 @@ export async function listPrompts(options: PromptListOptions) {
         .filter((item) => (options.scope === "user" ? item.ownerUserId === options.ownerUserId : true))
         .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
     const withoutTagFilter = filterPrompts(base, { keyword, category, tags: [] });
-    const filtered = filterPrompts(base, { keyword, category, tags });
+    const filtered = options.random ? shufflePrompts(filterPrompts(base, { keyword, category, tags })) : filterPrompts(base, { keyword, category, tags });
 
     return {
         items: filtered.slice((page - 1) * pageSize, page * pageSize),
@@ -87,6 +88,15 @@ export async function listPrompts(options: PromptListOptions) {
         total: filtered.length,
         scopeTotal: base.length,
     };
+}
+
+function shufflePrompts(items: StoredPrompt[]) {
+    const next = [...items];
+    for (let index = next.length - 1; index > 0; index -= 1) {
+        const randomIndex = Math.floor(Math.random() * (index + 1));
+        [next[index], next[randomIndex]] = [next[randomIndex], next[index]];
+    }
+    return next;
 }
 
 export async function listAllLibraryPrompts() {

@@ -20,7 +20,7 @@ type SeedanceTask = {
 type ApiEnvelope<T> = T | { code?: number; data?: T | null; msg?: string };
 type RequestOptions = { signal?: AbortSignal };
 
-export type VideoGenerationResult = { blob?: Blob; url?: string; mimeType?: string };
+export type VideoGenerationResult = { blob?: Blob; url?: string; remoteUrl?: string; mimeType?: string };
 export type VideoGenerationTask = { id: string; provider: "openai" | "seedance"; model: string };
 export type VideoGenerationTaskState = { status: "pending" } | { status: "completed"; result: VideoGenerationResult } | { status: "failed"; error: string };
 
@@ -80,8 +80,8 @@ export async function pollVideoGenerationTask(config: AiConfig, task: VideoGener
 }
 
 export async function storeGeneratedVideo(result: VideoGenerationResult): Promise<UploadedFile> {
-    if (result.blob) return uploadMediaFile(result.blob, "video");
-    if (result.url) return { url: result.url, storageKey: "", bytes: 0, mimeType: result.mimeType || "video/mp4" };
+    if (result.blob) return { ...(await uploadMediaFile(result.blob, "video")), remoteUrl: result.remoteUrl };
+    if (result.url) return { url: result.url, remoteUrl: result.remoteUrl || result.url, storageKey: "", bytes: 0, mimeType: result.mimeType || "video/mp4" };
     throw new Error("视频接口没有返回可播放的视频");
 }
 
@@ -241,10 +241,10 @@ async function videoResultFromUrl(url: string, options?: RequestOptions): Promis
     try {
         const response = await axios.get<Blob>(url, { responseType: "blob", signal: options?.signal });
         await assertVideoBlob(response.data);
-        return { blob: response.data };
+        return { blob: response.data, remoteUrl: url, mimeType: response.data.type || "video/mp4" };
     } catch (error) {
         if (axios.isCancel(error) || options?.signal?.aborted) throw error;
-        return { url, mimeType: "video/mp4" };
+        return { url, remoteUrl: url, mimeType: "video/mp4" };
     }
 }
 

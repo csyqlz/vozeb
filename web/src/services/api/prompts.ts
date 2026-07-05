@@ -24,12 +24,13 @@ export type PromptListResponse = {
     total: number;
 };
 
-export async function fetchPrompts({ keyword = "", tag = [], category = ALL_PROMPTS_OPTION, page, pageSize }: { keyword?: string; tag?: string[]; category?: string; page?: number; pageSize?: number } = {}) {
+export async function fetchPrompts({ keyword = "", tag = [], category = ALL_PROMPTS_OPTION, page, pageSize, random = false }: { keyword?: string; tag?: string[]; category?: string; page?: number; pageSize?: number; random?: boolean } = {}) {
     const params = serializeApiParams(
         compactApiParams({
             ...(keyword ? { keyword } : {}),
             ...(tag.length ? { tag } : {}),
             ...(category !== ALL_PROMPTS_OPTION ? { category } : {}),
+            ...(random ? { random: "1" } : {}),
             ...(page ? { page } : {}),
             ...(pageSize ? { pageSize } : {}),
         }),

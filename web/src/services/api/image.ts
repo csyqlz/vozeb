@@ -94,7 +94,7 @@ export type ImageGenerationTask = {
 
 type ImageTaskPayload = {
     task?: ImageGenerationTask & {
-        result?: { dataUrl?: string };
+        result?: { dataUrl?: string; remoteUrl?: string; serverUrl?: string };
         error?: string;
     };
     error?: string;
@@ -707,7 +707,7 @@ export async function waitForImageGenerationTask(config: AiConfig, task: ImageGe
         if (current.status === "success") {
             if (!current.result?.dataUrl) throw new Error("图片任务没有返回结果");
             await refreshUserPointsIfSystem(config.apiSource);
-            return { id: nanoid(), dataUrl: current.result.dataUrl };
+            return { id: nanoid(), dataUrl: current.result.dataUrl, remoteUrl: current.result.remoteUrl, serverUrl: current.result.serverUrl };
         }
         if (current.status === "error") {
             await refreshUserPointsIfSystem(config.apiSource);

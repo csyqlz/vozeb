@@ -38,7 +38,7 @@ export type ImageTask = {
     prompt: string;
     references: ImageTaskReference[];
     mask?: ImageTaskReference;
-    result?: { dataUrl: string };
+    result?: { dataUrl: string; remoteUrl?: string; serverUrl?: string };
     error?: string;
     pointsRemaining?: number;
 };
