@@ -1153,8 +1153,19 @@ async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog>
 }
 
 function generatedVideoFallback(video?: Partial<GeneratedVideo>) {
-    const stableUrl = video?.url && !video.url.startsWith("blob:") ? video.url : "";
-    return stableUrl || video?.remoteUrl || video?.serverUrl || "";
+    const value = video?.url || "";
+    const localValue = value.startsWith("data:") ? value : "";
+    const remoteUrl = isRemoteMediaUrl(video?.remoteUrl || "") ? video?.remoteUrl || "" : isRemoteMediaUrl(value) ? value : "";
+    const serverUrl = isServerMediaUrl(video?.serverUrl || "") ? video?.serverUrl || "" : isServerMediaUrl(value) ? value : "";
+    return localValue || remoteUrl || serverUrl || (value && !value.startsWith("blob:") ? value : "");
+}
+
+function isRemoteMediaUrl(value: string) {
+    return /^https?:\/\//i.test(value);
+}
+
+function isServerMediaUrl(value: string) {
+    return value.startsWith("/api/generation-log-assets/");
 }
 
 function serializeLog(log: GenerationLog): GenerationLog {

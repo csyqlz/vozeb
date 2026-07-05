@@ -14,7 +14,7 @@ import { createTextGenerationTask, waitForTextGenerationTask, type TextGeneratio
 import { createVideoGenerationTask, storeGeneratedVideo, waitForVideoGenerationTask } from "@/services/api/video";
 import { DOCS_URL } from "@/constant/env";
 import { defaultConfig, type AiConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
-import { resolveImageUrl, uploadImage, type UploadedImage } from "@/services/image-storage";
+import { resolveImageUrl, resolveStoredImageDataUrl, uploadImage, type UploadedImage } from "@/services/image-storage";
 import { resolveMediaUrl, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { nanoid } from "nanoid";
 import { getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
@@ -3392,10 +3392,12 @@ function audioExtension(mimeType?: string) {
 async function uploadGeneratedCanvasImage(url: string, remoteFallback = "", serverFallback = ""): Promise<UploadedImage> {
     const remoteUrl = isRemoteGeneratedUrl(remoteFallback) ? remoteFallback : isRemoteGeneratedUrl(url) ? url : "";
     const serverUrl = isServerGeneratedUrl(serverFallback) ? serverFallback : isServerGeneratedUrl(url) ? url : "";
-    const candidates = Array.from(new Set([url, remoteUrl, serverUrl].filter(Boolean)));
+    const localUrl = isLocalGeneratedUrl(url) ? url : "";
+    const candidates = Array.from(new Set([localUrl, remoteUrl, serverUrl, url].filter(Boolean)));
     for (const candidate of candidates) {
         try {
-            return { ...(await uploadImage(candidate)), remoteUrl: remoteUrl || undefined, serverUrl: serverUrl || undefined };
+            const image = await uploadImage(candidate);
+            return { ...image, url: await resolveStoredImageDataUrl(image.storageKey, image.url), remoteUrl: remoteUrl || undefined, serverUrl: serverUrl || undefined };
         } catch {
             // Try the next fallback source.
         }
@@ -3411,6 +3413,10 @@ function imageMetadata(image: UploadedImage): CanvasNodeMetadata {
 
 function isRemoteGeneratedUrl(value: string) {
     return /^https?:\/\//i.test(value);
+}
+
+function isLocalGeneratedUrl(value: string) {
+    return value.startsWith("data:") || value.startsWith("blob:");
 }
 
 function isServerGeneratedUrl(value: string) {
@@ -3485,12 +3491,12 @@ async function hydrateCanvasImages(nodes: CanvasNodeData[]) {
     return Promise.all(
         nodes.map(async (node) => {
             const content = node.metadata?.content;
-            const fallbackContent = stableGeneratedContent(content) || node.metadata?.remoteUrl || node.metadata?.serverUrl || "";
+            const fallbackContent = generatedContentFallback(content, node.metadata?.remoteUrl, node.metadata?.serverUrl);
             if ((node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio) && node.metadata?.storageKey) return { ...node, metadata: { ...node.metadata, content: await resolveMediaUrl(node.metadata.storageKey, fallbackContent) } };
             if ((node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio) && content?.startsWith("blob:") && fallbackContent) return { ...node, metadata: { ...node.metadata, content: fallbackContent } };
             if ((node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio) && !content && fallbackContent) return { ...node, metadata: { ...node.metadata, content: fallbackContent } };
             if (node.type !== CanvasNodeType.Image || !fallbackContent) return node;
-            if (node.metadata?.storageKey) return { ...node, metadata: { ...node.metadata, content: await resolveImageUrl(node.metadata.storageKey, fallbackContent) } };
+            if (node.metadata?.storageKey) return { ...node, metadata: { ...node.metadata, content: await resolveStoredImageDataUrl(node.metadata.storageKey, fallbackContent) } };
             if (content?.startsWith("blob:") && fallbackContent) return { ...node, metadata: { ...node.metadata, content: fallbackContent } };
             if (!content && fallbackContent) return { ...node, metadata: { ...node.metadata, content: fallbackContent } };
             const contentValue = content || "";
@@ -3500,16 +3506,20 @@ async function hydrateCanvasImages(nodes: CanvasNodeData[]) {
     );
 }
 
-function stableGeneratedContent(value?: string) {
-    return value && !value.startsWith("blob:") ? value : "";
+function generatedContentFallback(content?: string, remoteFallback?: string, serverFallback?: string) {
+    const value = content || "";
+    const localValue = value.startsWith("data:") ? value : "";
+    const remoteUrl = isRemoteGeneratedUrl(remoteFallback || "") ? remoteFallback || "" : isRemoteGeneratedUrl(value) ? value : "";
+    const serverUrl = isServerGeneratedUrl(serverFallback || "") ? serverFallback || "" : isServerGeneratedUrl(value) ? value : "";
+    return localValue || remoteUrl || serverUrl || (value && !value.startsWith("blob:") ? value : "");
 }
 
 async function hydrateAssistantImages(sessions: CanvasAssistantSession[]) {
     const hydrateItem = async <T extends { dataUrl?: string; storageKey?: string }>(item: T) => {
-        if (item.storageKey) return { ...item, dataUrl: await resolveImageUrl(item.storageKey, item.dataUrl) };
+        if (item.storageKey) return { ...item, dataUrl: await resolveStoredImageDataUrl(item.storageKey, item.dataUrl) };
         if (item.dataUrl?.startsWith("data:image/")) {
             const image = await uploadImage(item.dataUrl);
-            return { ...item, dataUrl: image.url, storageKey: image.storageKey };
+            return { ...item, dataUrl: await resolveStoredImageDataUrl(image.storageKey, image.url), storageKey: image.storageKey };
         }
         return item;
     };

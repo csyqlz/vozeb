@@ -98,7 +98,7 @@ async function proxySystemRequest(request: Request, context: RouteContext) {
     return new Response(upstream.body, {
         status: upstream.status,
         statusText: upstream.statusText,
-        headers: responseHeaders(upstream.headers, pointsResult, refundedPointsRemaining),
+        headers: responseHeaders(upstream.headers, pointsResult, refundedPointsRemaining, target),
     });
 }
 
@@ -169,7 +169,21 @@ function readMultipartFields(text: string): Record<string, string> {
 function targetUrl(baseUrl: string, apiFormat: "openai" | "gemini", path: string[], search: string) {
     const apiBase = normalizeApiBaseUrl(baseUrl, apiFormat);
     const cleanPath = path[0] === "v1" || path[0] === "v1beta" ? path.slice(1) : path;
-    return `${apiBase}/${cleanPath.map(encodeURIComponent).join("/")}${search}`;
+    return `${apiBase}/${cleanPath.map((segment) => encodeTargetPathSegment(segment, apiFormat)).join("/")}${search}`;
+}
+
+function encodeTargetPathSegment(segment: string, apiFormat: "openai" | "gemini") {
+    const decoded = safeDecodeURIComponent(segment);
+    const encoded = encodeURIComponent(decoded);
+    return apiFormat === "gemini" ? encoded.replace(/%3A/gi, ":") : encoded;
+}
+
+function safeDecodeURIComponent(value: string) {
+    try {
+        return decodeURIComponent(value);
+    } catch {
+        return value;
+    }
 }
 
 function normalizeApiBaseUrl(baseUrl: string, apiFormat: "openai" | "gemini") {
@@ -180,13 +194,14 @@ function normalizeApiBaseUrl(baseUrl: string, apiFormat: "openai" | "gemini") {
     return `${normalized}/v1`;
 }
 
-function responseHeaders(headers: Headers, pointsResult?: Awaited<ReturnType<typeof consumeUserPoints>> | null, refundedPointsRemaining?: number | null) {
+function responseHeaders(headers: Headers, pointsResult?: Awaited<ReturnType<typeof consumeUserPoints>> | null, refundedPointsRemaining?: number | null, upstreamUrl?: string) {
     const nextHeaders = new Headers();
     const passthrough = ["content-type", "cache-control", "content-disposition"];
     passthrough.forEach((key) => {
         const value = headers.get(key);
         if (value) nextHeaders.set(key, value);
     });
+    if (upstreamUrl) nextHeaders.set("x-vozeb-upstream-url", upstreamUrl);
     if (pointsResult) {
         nextHeaders.set("x-vozeb-points-cost", String(pointsResult.cost));
         nextHeaders.set("x-vozeb-points-remaining", String(pointsResult.remaining));

@@ -4,6 +4,7 @@ import { getCurrentUser } from "@/lib/auth/session";
 import { getAuthSettings } from "@/lib/auth/store";
 import { configureServerProxyDispatcher } from "@/lib/server/proxy-dispatcher";
 import { fetchInternalApi, isInternalApiBaseUrl, resolveInternalOrigin } from "@/lib/server/internal-origin";
+import { resolveGeneratedMediaUrl } from "@/lib/media-url";
 import { toSafeGenerationErrorMessage } from "@/lib/server/generation-errors";
 import { countActiveImageTasksForUser, createImageTask, updateImageTask, type ImageTask, type ImageTaskConfig, type ImageTaskReference } from "@/lib/server/image-task-store";
 import { isGenerationSource, recordGenerationLog } from "@/lib/server/generation-log-store";
@@ -62,6 +63,8 @@ const IMAGE_MAX_PIXELS = 8294400;
 const IMAGE_MAX_EDGE = 3840;
 const IMAGE_MAX_RATIO = 3;
 const IMAGE_OUTPUT_FORMAT = "png";
+const TASK_HEARTBEAT_MS = 30 * 1000;
+const MODEL_REQUEST_TIMEOUT_MS = 20 * 60 * 1000;
 
 export async function POST(request: Request) {
     const currentUser = await getCurrentUser();
@@ -98,6 +101,9 @@ export async function POST(request: Request) {
 
 async function runImageTask(task: ImageTask, origin: string, cookie: string) {
     updateImageTask(task.id, { status: "running" });
+    const heartbeat = setInterval(() => {
+        updateImageTask(task.id, { status: "running" });
+    }, TASK_HEARTBEAT_MS);
     try {
         const result = task.config.apiFormat === "gemini" ? await runGeminiImageTask(task, origin, cookie) : await runOpenAiImageTask(task, origin, cookie);
         const log = await writeImageGenerationLog(task, "success", result.dataUrl, Date.now() - task.createdAt);
@@ -112,6 +118,8 @@ async function runImageTask(task: ImageTask, origin: string, cookie: string) {
         const message = toSafeGenerationErrorMessage(error, "图片生成失败");
         updateImageTask(task.id, { status: "error", error: message });
         await writeImageGenerationLog(task, "failed", "", Date.now() - task.createdAt, message);
+    } finally {
+        clearInterval(heartbeat);
     }
 }
 
@@ -181,7 +189,8 @@ async function runOpenAiImageTask(task: ImageTask, origin: string, cookie: strin
 
     if (!response.ok) throw new Error(await readFetchError(response, "图片生成失败"));
     const payload = (await response.json()) as ImageApiResponse;
-    return { dataUrl: parseImagePayload(payload), pointsRemaining: readPointsRemaining(response.headers) };
+    const resultBaseUrl = response.headers.get("x-vozeb-upstream-url") || url;
+    return { dataUrl: parseImagePayload(payload, resultBaseUrl), pointsRemaining: readPointsRemaining(response.headers) };
 }
 
 async function runGeminiImageTask(task: ImageTask, origin: string, cookie: string) {
@@ -250,7 +259,11 @@ function taskHeaders(config: ImageTaskConfig, cookie: string) {
 }
 
 function taskFetch(config: ImageTaskConfig, url: string, init: RequestInit) {
-    return isInternalApiBaseUrl(config.baseUrl) ? fetchInternalApi(url, init) : fetch(url, init);
+    const nextInit = {
+        ...init,
+        signal: init.signal || AbortSignal.timeout(MODEL_REQUEST_TIMEOUT_MS),
+    };
+    return isInternalApiBaseUrl(config.baseUrl) ? fetchInternalApi(url, nextInit) : fetch(url, nextInit);
 }
 
 function geminiHeaders(config: ImageTaskConfig, cookie: string) {
@@ -269,16 +282,16 @@ function withSystemPrompt(config: ImageTaskConfig, prompt: string) {
     return systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt;
 }
 
-function parseImagePayload(payload: ImageApiResponse) {
+function parseImagePayload(payload: ImageApiResponse, baseUrl?: string) {
     if (typeof payload.code === "number" && payload.code !== 0) throw new Error(payload.msg || "图片生成失败");
     if (payload.error?.message) throw new Error(payload.error.message);
-    const image = payload.data?.map(resolveImageDataUrl).find(Boolean);
+    const image = payload.data?.map((item) => resolveImageDataUrl(item, baseUrl)).find(Boolean);
     if (!image) throw new Error("接口没有返回图片");
     return image;
 }
 
-function resolveImageDataUrl(item: Record<string, unknown>) {
-    if (typeof item.url === "string" && item.url) return item.url;
+function resolveImageDataUrl(item: Record<string, unknown>, baseUrl?: string) {
+    if (typeof item.url === "string" && item.url) return resolveGeneratedMediaUrl(item.url, baseUrl);
     if (typeof item.b64_json === "string" && item.b64_json) return `data:image/png;base64,${item.b64_json}`;
     return "";
 }

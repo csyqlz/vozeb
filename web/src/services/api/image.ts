@@ -4,6 +4,7 @@ import { buildApiUrl, resolveModelRequestConfig, type AiConfig, type ModelChanne
 import { nanoid } from "nanoid";
 import { dataUrlToFile } from "@/lib/image-utils";
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
+import { resolveGeneratedMediaUrl } from "@/lib/media-url";
 import { imageToDataUrl } from "@/services/image-storage";
 import { refreshUserPointsIfSystem, syncUserPointsFromHeaders } from "@/services/api/points";
 import type { ReferenceImage } from "@/types/image";
@@ -190,9 +191,9 @@ function resolveRequestSize(quality: string | undefined, size: string) {
     throw new Error("图像尺寸格式不支持，请使用 auto、9:16 或 1024x1024");
 }
 
-function resolveImageDataUrl(item: Record<string, unknown>) {
+function resolveImageDataUrl(item: Record<string, unknown>, baseUrl?: string) {
     if (typeof item.url === "string" && item.url) {
-        return item.url;
+        return resolveGeneratedMediaUrl(item.url, baseUrl);
     }
     if (typeof item.b64_json === "string" && item.b64_json) {
         return `data:image/png;base64,${item.b64_json}`;
@@ -200,13 +201,13 @@ function resolveImageDataUrl(item: Record<string, unknown>) {
     return null;
 }
 
-function parseImagePayload(payload: ImageApiResponse) {
+function parseImagePayload(payload: ImageApiResponse, baseUrl?: string) {
     if (typeof payload.code === "number" && payload.code !== 0) {
         throw new Error(payload.msg || "请求失败");
     }
     const images =
         payload.data
-            ?.map(resolveImageDataUrl)
+            ?.map((item) => resolveImageDataUrl(item, baseUrl))
             .filter((value): value is string => Boolean(value))
             .map((dataUrl) => ({ id: nanoid(), dataUrl })) || [];
 
@@ -333,6 +334,13 @@ function responseErrorMessage(value: unknown) {
 
 function stringValue(value: unknown) {
     return typeof value === "string" ? value : "";
+}
+
+function readHeader(headers: unknown, key: string) {
+    if (!headers || typeof headers !== "object") return "";
+    const getter = (headers as { get?: (name: string) => unknown }).get;
+    const value = typeof getter === "function" ? getter.call(headers, key) || getter.call(headers, key.toLowerCase()) : (headers as Record<string, unknown>)[key] || (headers as Record<string, unknown>)[key.toLowerCase()];
+    return typeof value === "string" ? value : Array.isArray(value) ? String(value[0] || "") : "";
 }
 
 function validateResponsePayload(payload: ResponseApiPayload) {
@@ -629,9 +637,10 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
     }
     const quality = normalizeQuality(config.quality);
     const requestSize = resolveRequestSize(quality, config.size);
+    const requestUrl = aiApiUrl(requestConfig, "/images/generations");
     try {
         const response = await axios.post<ImageApiResponse>(
-            aiApiUrl(requestConfig, "/images/generations"),
+            requestUrl,
             {
                 model: requestConfig.model,
                 prompt: withSystemPrompt(requestConfig, prompt),
@@ -647,7 +656,7 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
             },
         );
         syncUserPointsFromHeaders(response.headers, requestConfig.apiSource);
-        const images = parseImagePayload(response.data);
+        const images = parseImagePayload(response.data, readHeader(response.headers, "x-vozeb-upstream-url") || requestUrl);
         await refreshUserPointsIfSystem(requestConfig.apiSource);
         return images;
     } catch (error) {
@@ -751,9 +760,10 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     if (mask) formData.set("mask", dataUrlToFile(mask));
 
     try {
-        const response = await axios.post<ImageApiResponse>(aiApiUrl(requestConfig, "/images/edits"), formData, { headers: aiHeaders(requestConfig), signal: options?.signal });
+        const requestUrl = aiApiUrl(requestConfig, "/images/edits");
+        const response = await axios.post<ImageApiResponse>(requestUrl, formData, { headers: aiHeaders(requestConfig), signal: options?.signal });
         syncUserPointsFromHeaders(response.headers, requestConfig.apiSource);
-        const images = parseImagePayload(response.data);
+        const images = parseImagePayload(response.data, readHeader(response.headers, "x-vozeb-upstream-url") || requestUrl);
         await refreshUserPointsIfSystem(requestConfig.apiSource);
         return images;
     } catch (error) {

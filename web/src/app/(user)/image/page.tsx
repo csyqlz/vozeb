@@ -19,7 +19,7 @@ import { nanoid } from "nanoid";
 import { formatBytes, formatDuration, readImageMeta } from "@/lib/image-utils";
 import { APP_STORAGE_NAME, LEGACY_APP_STORAGE_NAME } from "@/lib/storage-keys";
 import { createImageGenerationTask, waitForImageGenerationTask } from "@/services/api/image";
-import { deleteStoredImages, resolveImageUrl, uploadImage } from "@/services/image-storage";
+import { deleteStoredImages, resolveImageUrl, resolveStoredImageDataUrl, uploadImage } from "@/services/image-storage";
 import { useAssetStore } from "@/stores/use-asset-store";
 import type { ReferenceImage } from "@/types/image";
 
@@ -1203,26 +1203,38 @@ function serializeLog(log: GenerationLog): GenerationLog {
     return {
         ...log,
         references: log.references.map((item) => ({ ...item, dataUrl: item.storageKey ? "" : item.dataUrl })),
-        images: log.images.map((image) => ({ ...image, dataUrl: isStableImageUrl(image.dataUrl) ? image.dataUrl : "" })),
+        images: log.images.map((image) => ({ ...image, dataUrl: image.storageKey ? "" : isStableImageUrl(image.dataUrl) ? image.dataUrl : "" })),
         thumbnails: [],
     };
 }
 
 async function hydrateGeneratedImageUrl(storageKey?: string, fallback = "", remoteFallback = "", serverFallback = "") {
-    const stableFallback = isStableImageUrl(fallback) ? fallback : "";
-    const fallbackUrl = stableFallback || remoteFallback || serverFallback;
+    const localFallback = isLocalImageUrl(fallback) ? fallback : "";
+    const remoteUrl = isRemoteImageUrl(remoteFallback) ? remoteFallback : isRemoteImageUrl(fallback) ? fallback : "";
+    const serverUrl = isServerImageUrl(serverFallback) ? serverFallback : isServerImageUrl(fallback) ? fallback : "";
+    const fallbackUrl = localFallback || remoteUrl || serverUrl;
     if (!storageKey) return fallbackUrl || fallback;
-    return resolveImageUrl(storageKey, fallbackUrl);
+    return resolveStoredImageDataUrl(storageKey, fallbackUrl);
 }
 
 async function normalizeGeneratedImage(url: string, remoteFallback = "", serverFallback = "") {
     const remoteUrl = isRemoteImageUrl(remoteFallback) ? remoteFallback : isRemoteImageUrl(url) ? url : "";
     const serverUrl = isServerImageUrl(serverFallback) ? serverFallback : isServerImageUrl(url) ? url : "";
-    const candidates = Array.from(new Set([url, remoteUrl, serverUrl].filter(Boolean)));
+    const localUrl = isLocalImageUrl(url) ? url : "";
+    const candidates = Array.from(new Set([localUrl, remoteUrl, serverUrl, url].filter(Boolean)));
     for (const candidate of candidates) {
         try {
             const stored = await uploadImage(candidate);
-            return { url: stored.url, remoteUrl: remoteUrl || undefined, serverUrl: serverUrl || undefined, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType, storageKey: stored.storageKey };
+            return {
+                url: await resolveStoredImageDataUrl(stored.storageKey, stored.url),
+                remoteUrl: remoteUrl || undefined,
+                serverUrl: serverUrl || undefined,
+                width: stored.width,
+                height: stored.height,
+                bytes: stored.bytes,
+                mimeType: stored.mimeType,
+                storageKey: stored.storageKey,
+            };
         } catch {
             // Try the next fallback source.
         }
@@ -1234,6 +1246,10 @@ async function normalizeGeneratedImage(url: string, remoteFallback = "", serverF
 
 function isStableImageUrl(value?: string) {
     return Boolean(value && (value.startsWith("data:") || /^https?:\/\//i.test(value) || isServerImageUrl(value)));
+}
+
+function isLocalImageUrl(value: string) {
+    return value.startsWith("data:") || value.startsWith("blob:");
 }
 
 function isRemoteImageUrl(value: string) {

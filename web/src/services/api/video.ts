@@ -1,6 +1,7 @@
 import axios from "axios";
 
 import { dataUrlToFile } from "@/lib/image-utils";
+import { resolveGeneratedMediaUrl } from "@/lib/media-url";
 import { getMediaBlob, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { imageToDataUrl } from "@/services/image-storage";
 import { refreshUserPointsIfSystem, syncUserPointsFromHeaders } from "@/services/api/points";
@@ -156,9 +157,11 @@ async function createSeedanceTask(config: AiConfig, model: string, prompt: strin
 
 async function pollSeedanceTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationTaskState> {
     try {
-        const state = unwrapSeedanceTask((await axios.get<ApiEnvelope<SeedanceTask>>(seedanceApiUrl(config, task.id), { headers: aiHeaders(config), signal: options?.signal })).data);
+        const requestUrl = seedanceApiUrl(config, task.id);
+        const response = await axios.get<ApiEnvelope<SeedanceTask>>(requestUrl, { headers: aiHeaders(config), signal: options?.signal });
+        const state = unwrapSeedanceTask(response.data);
         if (state.status === "succeeded") {
-            const url = state.content?.video_url;
+            const url = state.content?.video_url ? resolveGeneratedMediaUrl(state.content.video_url, readHeader(response.headers, "x-vozeb-upstream-url") || requestUrl) : "";
             if (!url) return { status: "failed", error: "Seedance 任务成功但没有返回视频 URL" };
             return { status: "completed", result: await videoResultFromUrl(url, options) };
         }
@@ -246,6 +249,13 @@ async function videoResultFromUrl(url: string, options?: RequestOptions): Promis
         if (axios.isCancel(error) || options?.signal?.aborted) throw error;
         return { url, remoteUrl: url, mimeType: "video/mp4" };
     }
+}
+
+function readHeader(headers: unknown, key: string) {
+    if (!headers || typeof headers !== "object") return "";
+    const getter = (headers as { get?: (name: string) => unknown }).get;
+    const value = typeof getter === "function" ? getter.call(headers, key) || getter.call(headers, key.toLowerCase()) : (headers as Record<string, unknown>)[key] || (headers as Record<string, unknown>)[key.toLowerCase()];
+    return typeof value === "string" ? value : Array.isArray(value) ? String(value[0] || "") : "";
 }
 
 function assertVideoConfig(config: AiConfig, model: string) {

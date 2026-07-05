@@ -46,6 +46,13 @@ export async function resolveImageUrl(storageKey?: string, fallback = "") {
     return url;
 }
 
+export async function resolveStoredImageDataUrl(storageKey?: string, fallback = "") {
+    if (!storageKey) return fallback;
+    const blob = await getImageBlob(storageKey);
+    if (!blob) return fallback;
+    return blobToDataUrl(blob);
+}
+
 export async function getImageBlob(storageKey: string) {
     const blob = await store.getItem<Blob>(storageKey);
     if (blob) return blob;

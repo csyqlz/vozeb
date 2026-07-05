@@ -38,6 +38,51 @@ const CANVAS_STORE_KEY = appStorageKey("canvas_store");
 type PersistedCanvasState = Pick<CanvasStore, "projects">;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let queuedPersistState: PersistedCanvasState | null = null;
+let queuedPersistWrite: { name: string; value: string } | null = null;
+let flushListenersAttached = false;
+
+function flushQueuedCanvasSave() {
+    if (saveTimer) {
+        clearTimeout(saveTimer);
+        saveTimer = null;
+    }
+    const queued = queuedPersistWrite;
+    queuedPersistWrite = null;
+    if (queued) void localForageStorage.setItem(queued.name, queued.value);
+}
+
+function attachCanvasSaveFlushListeners() {
+    if (flushListenersAttached || typeof window === "undefined") return;
+    flushListenersAttached = true;
+    window.addEventListener("pagehide", flushQueuedCanvasSave);
+    window.addEventListener("beforeunload", flushQueuedCanvasSave);
+    document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "hidden") flushQueuedCanvasSave();
+    });
+}
+
+function serializeProjectsForPersist(projects: CanvasProject[]) {
+    return projects.map((project) => ({
+        ...project,
+        nodes: project.nodes.map(serializeNodeForPersist),
+        chatSessions: project.chatSessions.map((session) => ({
+            ...session,
+            messages: session.messages.map((message) => ({
+                ...message,
+                references: message.references?.map((reference) => (reference.storageKey && isLocalInlineMedia(reference.dataUrl) ? { ...reference, dataUrl: "" } : reference)),
+            })),
+        })),
+    }));
+}
+
+function serializeNodeForPersist(node: CanvasNodeData): CanvasNodeData {
+    if (!node.metadata?.storageKey || !isLocalInlineMedia(node.metadata.content)) return node;
+    return { ...node, metadata: { ...node.metadata, content: "" } };
+}
+
+function isLocalInlineMedia(value?: string) {
+    return Boolean(value?.startsWith("data:") || value?.startsWith("blob:"));
+}
 
 const canvasStorage: PersistStorage<CanvasStore> = {
     getItem: async (name) => {
@@ -48,13 +93,17 @@ const canvasStorage: PersistStorage<CanvasStore> = {
         return parsed;
     },
     setItem: (name, value) => {
+        attachCanvasSaveFlushListeners();
         const nextState = value.state as PersistedCanvasState;
         if (queuedPersistState && queuedPersistState.projects === nextState.projects) return;
         queuedPersistState = nextState;
+        queuedPersistWrite = { name, value: JSON.stringify(value) };
         if (saveTimer) clearTimeout(saveTimer);
         saveTimer = setTimeout(() => {
             saveTimer = null;
-            void localForageStorage.setItem(name, JSON.stringify(value));
+            const queued = queuedPersistWrite;
+            queuedPersistWrite = null;
+            if (queued) void localForageStorage.setItem(queued.name, queued.value);
         }, 400);
     },
     removeItem: (name) => localForageStorage.removeItem(name),
@@ -125,7 +174,7 @@ export const useCanvasStore = create<CanvasStore>()(
             storage: canvasStorage,
             partialize: (state) =>
                 ({
-                    projects: state.projects,
+                    projects: serializeProjectsForPersist(state.projects),
                 }) as StorageValue<CanvasStore>["state"],
             onRehydrateStorage: () => () => {
                 useCanvasStore.setState({ hydrated: true });
