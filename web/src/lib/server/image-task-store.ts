@@ -21,6 +21,7 @@ export type ImageTaskReference = {
     name?: string;
     type?: string;
     dataUrl: string;
+    url?: string;
 };
 
 export type ImageTask = {

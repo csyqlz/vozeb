@@ -16,6 +16,7 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { imageReferenceLabel } from "@/lib/image-reference-prompt";
 import { modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
+import { useUserStore } from "@/stores/use-user-store";
 import { nanoid } from "nanoid";
 import { formatBytes, formatDuration, readImageMeta } from "@/lib/image-utils";
 import { APP_STORAGE_NAME, LEGACY_APP_STORAGE_NAME } from "@/lib/storage-keys";
@@ -31,6 +32,7 @@ type GeneratedImage = {
     remoteUrl?: string;
     serverUrl?: string;
     storageKey?: string;
+    taskId?: string;
     slotIndex?: number;
     durationMs: number;
     width: number;
@@ -64,6 +66,7 @@ type GenerationResult = {
 
 type GenerationLog = {
     id: string;
+    ownerUserId?: string;
     createdAt: number;
     title: string;
     prompt: string;
@@ -92,7 +95,7 @@ type GenerationSnapshot = { text: string; config: AiConfig; references: Referenc
 type UpdateAiConfig = <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
 
 const RESULT_ACTION_BUTTON_CLASS = "min-w-0 px-1.5 [&_.ant-btn-icon]:shrink-0 [&>span:last-child]:min-w-0 [&>span:last-child]:truncate";
-const logStore = localforage.createInstance({ name: APP_STORAGE_NAME, storeName: "image_generation_logs" });
+const globalLogStore = localforage.createInstance({ name: APP_STORAGE_NAME, storeName: "image_generation_logs" });
 const legacyLogStore = localforage.createInstance({ name: LEGACY_APP_STORAGE_NAME, storeName: "image_generation_logs" });
 const loadPromptSelectDialog = () => import("@/components/prompts/prompt-select-dialog").then((module) => module.PromptSelectDialog);
 const loadAssetPickerModal = () => import("@/app/(user)/canvas/components/asset-picker-modal").then((module) => module.AssetPickerModal);
@@ -108,6 +111,7 @@ export default function ImagePage() {
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const addAsset = useAssetStore((state) => state.addAsset);
+    const userId = useUserStore((state) => state.user?.id || "");
     const [prompt, setPrompt] = useState("");
     const [references, setReferences] = useState<ReferenceImage[]>([]);
     const [results, setResults] = useState<GenerationResult[]>([]);
@@ -131,6 +135,7 @@ export default function ImagePage() {
     const activeImageTasksRef = useRef(0);
     const imageTaskQueueRef = useRef<Array<() => void>>([]);
     const imageConcurrencyLimitRef = useRef(4);
+    const userIdRef = useRef("");
     const [activeImageTasks, setActiveImageTasks] = useState(0);
 
     const model = effectiveConfig.imageModel || effectiveConfig.model;
@@ -138,11 +143,30 @@ export default function ImagePage() {
     const generationCount = Math.max(1, Math.min(10, Number(config.count) || 1));
     const imageConcurrencyLimit = Math.max(1, Math.min(10, Math.floor(Number(effectiveConfig.generationConcurrency?.image) || 4)));
     const previewPendingCount = results.filter((result) => result.status === "pending").length;
-    const pointsCost = requestCreditCost({ apiSource: effectiveConfig.apiSource, modelPointCosts: effectiveConfig.modelPointCosts, generationPointMultipliers: effectiveConfig.generationPointMultipliers, kind: "image", model, count: generationCount, quality: effectiveConfig.quality });
+    const pointsCost = requestCreditCost({
+        apiSource: effectiveConfig.apiSource,
+        modelPointCosts: effectiveConfig.modelPointCosts,
+        generationPointMultipliers: effectiveConfig.generationPointMultipliers,
+        kind: "image",
+        model,
+        count: generationCount,
+        quality: effectiveConfig.quality,
+    });
 
     useEffect(() => {
-        void refreshLogs();
-    }, []);
+        userIdRef.current = userId;
+        deletedLogIdsRef.current.clear();
+        deletedResultIdsRef.current.clear();
+        resultsByLogIdRef.current.clear();
+        activeLogIdRef.current = null;
+        setPreviewLog(null);
+        setResults([]);
+        setSelectedLogIds([]);
+        setSelectedResultIds([]);
+        setMissingResultIds([]);
+        if (userId) void refreshLogs(userId);
+        else replaceLogs([]);
+    }, [userId]);
 
     useEffect(() => {
         return preloadOnIdle(() => {
@@ -219,13 +243,14 @@ export default function ImagePage() {
     }
 
     const saveLog = async (log: GenerationLog) => {
-        upsertLog(log);
+        const ownedLog = withLogOwner(log, userIdRef.current);
+        upsertLog(ownedLog);
         const previousWrite = logWriteQueuesRef.current.get(log.id) || Promise.resolve();
-        const nextWrite = previousWrite.catch(() => {}).then(() => logStore.setItem(log.id, serializeLog(log)));
+        const nextWrite = previousWrite.catch(() => {}).then(() => globalLogStore.setItem(ownedLog.id, serializeLog(ownedLog)));
         logWriteQueuesRef.current.set(log.id, nextWrite);
         await nextWrite;
         if (logWriteQueuesRef.current.get(log.id) === nextWrite) logWriteQueuesRef.current.delete(log.id);
-        void recordImageWorkbenchLog(log);
+        void recordImageWorkbenchLog(ownedLog);
     };
 
     function getLatestLog(logId: string) {
@@ -352,6 +377,7 @@ export default function ImagePage() {
             remoteUrl: imageMeta.remoteUrl,
             serverUrl: imageMeta.serverUrl,
             storageKey: imageMeta.storageKey,
+            taskId: pendingTask.taskId,
             slotIndex: index,
             durationMs,
             width: imageMeta.width,
@@ -370,7 +396,7 @@ export default function ImagePage() {
             return;
         }
         if (!isAiConfigReady(effectiveConfig, model)) {
-            message.warning("请先完成配置");
+            message.warning("请联系管理员在后台配置可用生图模型");
             openConfigDialog(true);
             return;
         }
@@ -429,7 +455,7 @@ export default function ImagePage() {
             return;
         }
         const stored = await uploadImage(image.dataUrl);
-        setReferences((value) => [...value, { id: nanoid(), name: `result-${index + 1}.png`, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }]);
+        setReferences((value) => [...value, { id: nanoid(), name: `result-${index + 1}.png`, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey, url: image.remoteUrl || image.serverUrl }]);
         message.success("已加入参考图");
     };
 
@@ -495,7 +521,7 @@ export default function ImagePage() {
         setSelectedLogIds([]);
         setDeleteConfirmOpen(false);
         const serverIds = deleteIds.flatMap(imageServerLogIds);
-        const results = await Promise.allSettled([deleteStoredImages(imageKeys), deleteServerGenerationLogs(serverIds), ...deleteIds.flatMap((id) => [logStore.removeItem(id), legacyLogStore.removeItem(id)])]);
+        const results = await Promise.allSettled([deleteStoredImages(imageKeys), deleteServerGenerationLogs(serverIds), ...deleteIds.flatMap((id) => [globalLogStore.removeItem(id), legacyLogStore.removeItem(id)])]);
         const failed = results.filter((result) => result.status === "rejected");
         if (failed.length) {
             message.warning("记录已从本地列表移除，部分远程或本地缓存删除失败，请稍后刷新重试");
@@ -505,7 +531,7 @@ export default function ImagePage() {
         await refreshLogs();
     };
 
-    const refreshLogs = async () => replaceLogs(await readStoredLogs());
+    const refreshLogs = async (ownerUserId = userIdRef.current) => replaceLogs(ownerUserId ? await readStoredLogs(ownerUserId) : []);
 
     const previewGenerationLog = async (log: GenerationLog) => {
         const currentLog = getLatestLog(log.id) || log;
@@ -528,7 +554,7 @@ export default function ImagePage() {
             return null;
         }
         if (!isAiConfigReady(effectiveConfig, model)) {
-            message.warning("请先完成配置");
+            message.warning("请联系管理员在后台配置可用生图模型");
             openConfigDialog(true);
             return null;
         }
@@ -607,8 +633,10 @@ export default function ImagePage() {
         setLogResults(currentLog.id, nextResults);
         setSelectedResultIds((value) => value.filter((id) => !selectedIds.has(id)));
         setMissingResultIds((value) => value.filter((id) => !selectedIds.has(id)));
-        await Promise.all([deleteStoredImages(storageKeys), saveLog(nextLog)]);
-        message.success(successText || `已删除 ${removedResults.length} 个结果`);
+        const cleanupResults = await Promise.allSettled([deleteStoredImages(storageKeys), deleteServerImageTaskLogsForResults(currentLog, removedResults, nextResults)]);
+        await saveLog(nextLog);
+        if (cleanupResults.some((result) => result.status === "rejected")) message.warning("结果已从当前记录移除，部分服务器或本地缓存清理失败，请稍后刷新重试");
+        else message.success(successText || `已删除 ${removedResults.length} 个结果`);
     };
 
     const deleteSelectedResults = async () => {
@@ -1172,40 +1200,41 @@ function LogCard({ log, selected, active, onSelectedChange, onClick, onRename }:
     );
 }
 
-async function readStoredLogs() {
+async function readStoredLogs(userId: string) {
     if (typeof window === "undefined") return [];
     try {
         const values: GenerationLog[] = [];
-        await logStore.iterate<GenerationLog, void>((value) => {
+        const orphanKeys: string[] = [];
+        await globalLogStore.iterate<GenerationLog, void>((value, key) => {
+            if (!value?.ownerUserId) {
+                orphanKeys.push(key);
+                return;
+            }
             values.push(value);
         });
-        if (!values.length) {
-            await legacyLogStore.iterate<GenerationLog, void>((value, key) => {
-                values.push(value);
-                void logStore.setItem(key, value);
-            });
-        }
-        const [localLogs, remoteLogs] = await Promise.all([Promise.all(values.map(normalizeLog)), readServerImageLogs()]);
-        localLogs.forEach((log) => void recordImageWorkbenchLog(log));
+        await Promise.all(orphanKeys.map((key) => globalLogStore.removeItem(key).catch(() => undefined)));
+        const ownedValues = values.filter((log) => log.ownerUserId === userId);
+        const [localLogs, remoteLogs] = await Promise.all([Promise.all(ownedValues.map(normalizeLog)), readServerImageLogs()]);
+        const ownedRemoteLogs = remoteLogs.map((log) => withLogOwner(log, userId));
         const merged = new Map<string, GenerationLog>();
-        remoteLogs.forEach((log) => merged.set(log.id, log));
+        ownedRemoteLogs.forEach((log) => merged.set(log.id, log));
         localLogs.forEach((log) => merged.set(log.id, log));
         const logs = Array.from(merged.values()).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-        await Promise.all(logs.filter((log) => !values.some((item) => item.id === log.id)).map((log) => logStore.setItem(log.id, serializeLog(log)).catch(() => undefined)));
+        await Promise.all(logs.filter((log) => !ownedValues.some((item) => item.id === log.id)).map((log) => globalLogStore.setItem(log.id, serializeLog(log)).catch(() => undefined)));
         return logs;
     } catch {
         return [];
     }
 }
 
+function withLogOwner(log: GenerationLog, userId: string): GenerationLog {
+    return userId ? { ...log, ownerUserId: userId } : log;
+}
+
 async function readServerImageLogs() {
     try {
         const payload = await listGenerationLogs({ kind: "image", source: "image-workbench", pageSize: 100 });
-        const aggregateAssetUrls = new Set(
-            payload.items
-                .filter((item) => item.id.startsWith("image-workbench:"))
-                .flatMap((item) => item.assets.map(stableAssetUrl).filter(Boolean)),
-        );
+        const aggregateAssetUrls = new Set(payload.items.filter((item) => item.id.startsWith("image-workbench:")).flatMap((item) => item.assets.map(stableAssetUrl).filter(Boolean)));
         const records = payload.items.filter((item) => item.id.startsWith("image-workbench:") || !item.assets.some((asset) => aggregateAssetUrls.has(stableAssetUrl(asset))));
         return Promise.all(records.map(serverImageLogToWorkbenchLog));
     } catch {
@@ -1217,6 +1246,38 @@ function stableAssetUrl(asset: StoredGenerationLogRecord["assets"][number]) {
     return asset.remoteUrl || asset.serverUrl || asset.url || "";
 }
 
+async function deleteServerImageTaskLogsForResults(currentLog: GenerationLog, removedResults: GenerationResult[], nextResults: GenerationResult[]) {
+    const explicitIds = new Set<string>();
+    if (currentLog.id.startsWith("image-task-")) imageServerLogIds(currentLog.id).forEach((id) => explicitIds.add(id));
+    removedResults.forEach((result) => {
+        if (result.image?.taskId) explicitIds.add(`image-task:${result.image.taskId}`);
+    });
+
+    const removedUrls = new Set(removedResults.map((result) => stableResultImageUrl(result.image)).filter(Boolean));
+    const keptUrls = new Set(nextResults.map((result) => stableResultImageUrl(result.image)).filter(Boolean));
+    if (!explicitIds.size && !removedUrls.size) return;
+
+    const payload = await listGenerationLogs({ kind: "image", source: "image-workbench", pageSize: 100 });
+    payload.items.forEach((record) => {
+        if (!record.id.startsWith("image-task:")) return;
+        if (explicitIds.has(record.id)) {
+            explicitIds.add(record.id);
+            return;
+        }
+        const hasRemovedAsset = record.assets.some((asset) => {
+            const url = stableAssetUrl(asset);
+            return url && removedUrls.has(url) && !keptUrls.has(url);
+        });
+        if (hasRemovedAsset) explicitIds.add(record.id);
+    });
+    if (explicitIds.size) await deleteServerGenerationLogs(Array.from(explicitIds));
+}
+
+function stableResultImageUrl(image?: GeneratedImage) {
+    if (!image) return "";
+    return image.remoteUrl || image.serverUrl || (isStableImageUrl(image.dataUrl) ? image.dataUrl : "");
+}
+
 async function serverImageLogToWorkbenchLog(record: StoredGenerationLogRecord): Promise<GenerationLog> {
     const createdAt = Date.parse(record.createdAt) || Date.now();
     const images: GeneratedImage[] = record.assets.map((asset, index) => ({
@@ -1225,6 +1286,7 @@ async function serverImageLogToWorkbenchLog(record: StoredGenerationLogRecord): 
         remoteUrl: asset.remoteUrl,
         serverUrl: asset.serverUrl,
         storageKey: undefined,
+        taskId: record.taskId || (record.id.startsWith("image-task:") ? record.id.replace(/^image-task:/, "") : undefined),
         slotIndex: index,
         durationMs: record.durationMs || 0,
         width: asset.width || 0,
@@ -1316,6 +1378,7 @@ async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog>
     const failCount = log.failCount ?? failures.length;
     return {
         id: log.id || nanoid(),
+        ownerUserId: log.ownerUserId,
         createdAt: log.createdAt || Date.now(),
         title: log.title || log.model || "未命名",
         prompt: log.prompt || log.title || "",

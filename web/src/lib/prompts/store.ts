@@ -166,8 +166,8 @@ function filterPrompts(items: StoredPrompt[], options: { keyword: string; catego
 }
 
 function normalizePromptInput(input: PromptInput) {
-    const title = (input.title || "").trim();
-    const prompt = (input.prompt || "").trim();
+    const title = repairMojibakeText(input.title || "").trim();
+    const prompt = repairMojibakeText(input.prompt || "").trim();
     if (!title) throw new AuthInputError("请输入标题");
     if (!prompt) throw new AuthInputError("请输入提示词内容");
     return {
@@ -175,14 +175,17 @@ function normalizePromptInput(input: PromptInput) {
         coverUrl: (input.coverUrl || DEFAULT_COVER_URL).trim(),
         prompt,
         tags: normalizeTags(input.tags),
-        category: (input.category || "默认").trim().slice(0, 40) || "默认",
-        preview: (input.preview || "").trim(),
+        category:
+            repairMojibakeText(input.category || "默认")
+                .trim()
+                .slice(0, 40) || "默认",
+        preview: repairMojibakeText(input.preview || "").trim(),
     };
 }
 
 function normalizeTags(value: PromptInput["tags"]) {
     const raw = Array.isArray(value) ? value : String(value || "").split(/[,，\n]/);
-    return Array.from(new Set(raw.map((tag) => tag.trim().toLowerCase()).filter(Boolean))).slice(0, 12);
+    return Array.from(new Set(raw.map((tag) => repairMojibakeText(tag).trim().toLowerCase()).filter(Boolean))).slice(0, 12);
 }
 
 async function readPromptDb({ includeSeeds }: { includeSeeds: boolean }): Promise<PromptDatabase> {
@@ -259,17 +262,40 @@ function normalizeStoredPrompt(value: StoredPrompt): StoredPrompt {
         id: value.id || randomUUID(),
         scope: value.scope === "user" ? "user" : "library",
         ownerUserId: value.ownerUserId,
-        title: value.title || "未命名提示词",
+        title: repairMojibakeText(value.title || "") || "未命名提示词",
         coverUrl: value.coverUrl || "",
-        prompt: value.prompt || "",
+        prompt: repairMojibakeText(value.prompt || ""),
         tags: normalizeTags(value.tags),
-        category: value.category || "默认",
-        preview: value.preview || "",
+        category: repairMojibakeText(value.category || "") || "默认",
+        preview: repairMojibakeText(value.preview || ""),
         githubUrl: value.githubUrl,
         source: value.source,
         createdAt: value.createdAt || now,
         updatedAt: value.updatedAt || value.createdAt || now,
     };
+}
+
+function repairMojibakeText(value: string) {
+    if (!looksLikeUtf8Mojibake(value)) return value;
+    const repaired = Buffer.from(value, "latin1").toString("utf8");
+    if (!repaired || repaired.includes("\uFFFD")) return value;
+    return textQualityScore(repaired) > textQualityScore(value) ? repaired : value;
+}
+
+function looksLikeUtf8Mojibake(value: string) {
+    if (!value) return false;
+    if (/[\u0080-\u009f]/.test(value)) return true;
+    if (/[ÂÃ][\u0080-\u00ff]/.test(value)) return true;
+    const markers = value.match(/[åæçèéäöüï½ð]/g)?.length || 0;
+    return markers >= 2 && !/[\u4e00-\u9fff]/.test(value);
+}
+
+function textQualityScore(value: string) {
+    const cjk = value.match(/[\u4e00-\u9fff]/g)?.length || 0;
+    const controls = value.match(/[\u0080-\u009f]/g)?.length || 0;
+    const replacements = value.match(/\uFFFD/g)?.length || 0;
+    const mojibakeMarkers = value.match(/[ÂÃåæçèéäöüï½ð]/g)?.length || 0;
+    return cjk * 4 - controls * 6 - replacements * 20 - mojibakeMarkers;
 }
 
 function collectTags(items: StoredPrompt[]) {

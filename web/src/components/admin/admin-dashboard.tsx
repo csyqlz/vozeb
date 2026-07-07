@@ -6,6 +6,7 @@ import { App, Button, Checkbox, DatePicker, Form, Input, InputNumber, Modal, Pag
 import type { TableColumnsType } from "antd";
 import { browserReadableMediaUrl } from "@/lib/browser-media-url";
 import {
+    Copy,
     Database,
     Download,
     ExternalLink,
@@ -16,6 +17,7 @@ import {
     Image as ImageIcon,
     KeyRound,
     Mail,
+    Megaphone,
     PlugZap,
     Plus,
     RefreshCw,
@@ -35,7 +37,7 @@ import dayjs from "dayjs";
 import { nanoid } from "nanoid";
 
 import { DEFAULT_MODEL_POINT_COST_KEY, formatCreditAmount } from "@/constant/credits";
-import type { AuthSettings, PublicUser, SiteFriendLink, SiteShowcaseItem, SiteSocialKey, SystemModelChannel, UserRole, UserStatus } from "@/lib/auth/store";
+import type { AuthSettings, CreatedCdkCode, PublicAnnouncement, PublicCdkCode, PublicUser, SiteFriendLink, SiteShowcaseItem, SiteSocialKey, SystemModelChannel, UserRole, UserStatus } from "@/lib/auth/store";
 import type { GenerationAssetStats, StoredGenerationLog } from "@/lib/server/generation-log-store";
 import type { Prompt } from "@/services/api/prompts";
 
@@ -79,10 +81,17 @@ type ChannelHealthResult = {
     error?: string;
 };
 
-type AdminSectionKey = "overview" | "site" | "settings" | "users" | "logs" | "prompts";
+type WebdavSyncProgressLine = {
+    id: string;
+    text: string;
+    status?: "active" | "success" | "exception";
+};
+
+type AdminSectionKey = "overview" | "site" | "settings" | "cdk" | "announcements" | "users" | "logs" | "prompts";
 
 const PROMPT_PAGE_SIZE = 20;
 const PROMPT_SEARCH_DEBOUNCE_MS = 300;
+const CDK_PAGE_SIZE = 20;
 const GENERATION_LOG_PAGE_SIZE = 20;
 const imageQualityMultiplierOptions = [
     { key: "auto", label: "自动" },
@@ -160,6 +169,30 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
     const [generationLogsLoading, setGenerationLogsLoading] = useState(false);
     const [bulkDeletingGenerationLogs, setBulkDeletingGenerationLogs] = useState(false);
     const [viewingGenerationLog, setViewingGenerationLog] = useState<StoredGenerationLog | null>(null);
+    const [viewingCdkCode, setViewingCdkCode] = useState<PublicCdkCode | null>(null);
+    const [cdkCodes, setCdkCodes] = useState<PublicCdkCode[]>([]);
+    const [cdkLoading, setCdkLoading] = useState(false);
+    const [cdkGenerating, setCdkGenerating] = useState(false);
+    const [createdCdkCodes, setCreatedCdkCodes] = useState<CreatedCdkCode[]>([]);
+    const [selectedCreatedCdkIds, setSelectedCreatedCdkIds] = useState<string[]>([]);
+    const [cdkForm, setCdkForm] = useState({ count: 1, points: 10, maxRedemptions: 1, expiresInDays: null as number | null, note: "" });
+    const [cdkSearch, setCdkSearch] = useState("");
+    const [debouncedCdkSearch, setDebouncedCdkSearch] = useState("");
+    const [cdkFilter, setCdkFilter] = useState<"all" | "redeemed" | "unused" | "expired">("all");
+    const [cdkPage, setCdkPage] = useState(1);
+    const [cdkTotal, setCdkTotal] = useState(0);
+    const [cdkStats, setCdkStats] = useState({ total: 0, redeemed: 0, unused: 0, expired: 0 });
+    const [selectedCdkIds, setSelectedCdkIds] = useState<string[]>([]);
+    const [bulkDeletingCdk, setBulkDeletingCdk] = useState(false);
+    const [announcements, setAnnouncements] = useState<PublicAnnouncement[]>([]);
+    const [announcementsLoading, setAnnouncementsLoading] = useState(false);
+    const [announcementSaving, setAnnouncementSaving] = useState(false);
+    const [announcementDraft, setAnnouncementDraft] = useState<Partial<PublicAnnouncement>>({ title: "", content: "", enabled: true, popupHome: false, popupAfterLogin: false });
+    const [webdavTesting, setWebdavTesting] = useState(false);
+    const [webdavSyncOpen, setWebdavSyncOpen] = useState(false);
+    const [webdavSyncing, setWebdavSyncing] = useState(false);
+    const [webdavSyncProgress, setWebdavSyncProgress] = useState<WebdavSyncProgressLine[]>([]);
+    const [webdavSyncSummary, setWebdavSyncSummary] = useState("");
     const [editingUser, setEditingUser] = useState<PublicUser | null>(null);
     const [creatingUser, setCreatingUser] = useState(false);
     const [activeSection, setActiveSection] = useState<AdminSectionKey>("overview");
@@ -191,11 +224,19 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
     const selectedGenerationLogs = useMemo(() => generationLogs.filter((log) => selectedGenerationLogIds.includes(log.id)), [generationLogs, selectedGenerationLogIds]);
     const promptListStart = promptListTotal ? (promptPage - 1) * PROMPT_PAGE_SIZE + 1 : 0;
     const promptListEnd = Math.min(promptPage * PROMPT_PAGE_SIZE, promptListTotal);
+    const selectedCreatedCdkCodes = useMemo(() => createdCdkCodes.filter((code) => selectedCreatedCdkIds.includes(code.id)), [createdCdkCodes, selectedCreatedCdkIds]);
+    const createdCdkActionCodes = selectedCreatedCdkCodes.length ? selectedCreatedCdkCodes : createdCdkCodes;
+    const allCreatedCdkSelected = Boolean(createdCdkCodes.length) && selectedCreatedCdkIds.length === createdCdkCodes.length;
 
     useEffect(() => {
         const timer = window.setTimeout(() => setDebouncedPromptSearch(promptSearch.trim()), PROMPT_SEARCH_DEBOUNCE_MS);
         return () => window.clearTimeout(timer);
     }, [promptSearch]);
+
+    useEffect(() => {
+        const timer = window.setTimeout(() => setDebouncedCdkSearch(cdkSearch.trim()), PROMPT_SEARCH_DEBOUNCE_MS);
+        return () => window.clearTimeout(timer);
+    }, [cdkSearch]);
 
     useEffect(() => {
         if (activeSection !== "prompts") return;
@@ -211,6 +252,16 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
         if (activeSection !== "logs") return;
         void loadGenerationLogs();
     }, [activeSection, generationLogPage, generationLogSearch, generationLogKind, generationLogSource, generationLogStatus, generationLogUserId, generationLogStart, generationLogEnd]);
+
+    useEffect(() => {
+        if (activeSection !== "cdk") return;
+        void loadCdkCodes();
+    }, [activeSection, cdkPage, debouncedCdkSearch, cdkFilter]);
+
+    useEffect(() => {
+        if (activeSection !== "announcements") return;
+        void loadAnnouncements();
+    }, [activeSection]);
 
     const saveSettings = async (patch: Partial<AuthSettings>, successText = "设置已保存") => {
         setSettingsLoading(true);
@@ -584,6 +635,215 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
         setGenerationLogPage(1);
     };
 
+    const loadCdkCodes = async (override?: { page?: number; keyword?: string; filter?: typeof cdkFilter }) => {
+        setCdkLoading(true);
+        try {
+            const nextPage = override?.page ?? cdkPage;
+            const nextKeyword = override?.keyword ?? debouncedCdkSearch;
+            const nextFilter = override?.filter ?? cdkFilter;
+            const params = new URLSearchParams({
+                page: String(nextPage),
+                pageSize: String(CDK_PAGE_SIZE),
+                keyword: nextKeyword,
+                filter: nextFilter,
+            });
+            const response = await fetch(`/api/admin/cdk?${params.toString()}`, { cache: "no-store" });
+            const payload = (await response.json()) as {
+                codes?: PublicCdkCode[];
+                total?: number;
+                page?: number;
+                stats?: typeof cdkStats;
+                error?: string;
+            };
+            if (!response.ok || !payload.codes) throw new Error(payload.error || "加载 CDK 失败");
+            setCdkCodes(payload.codes);
+            setCdkTotal(payload.total || 0);
+            setCdkStats(payload.stats || { total: 0, redeemed: 0, unused: 0, expired: 0 });
+            if (payload.page && payload.page !== cdkPage) setCdkPage(payload.page);
+            setSelectedCdkIds((current) => current.filter((id) => payload.codes!.some((code) => code.id === id)));
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "加载 CDK 失败");
+        } finally {
+            setCdkLoading(false);
+        }
+    };
+
+    const generateCdkCodes = async () => {
+        setCdkGenerating(true);
+        try {
+            const response = await fetch("/api/admin/cdk", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(cdkForm),
+            });
+            const payload = (await response.json()) as { codes?: CreatedCdkCode[]; error?: string };
+            if (!response.ok || !payload.codes) throw new Error(payload.error || "生成 CDK 失败");
+            setCreatedCdkCodes((current) => [...payload.codes!, ...current]);
+            setSelectedCreatedCdkIds(payload.codes.map((code) => code.id));
+            setCdkSearch("");
+            setDebouncedCdkSearch("");
+            setCdkFilter("unused");
+            setCdkPage(1);
+            await loadCdkCodes({ page: 1, keyword: "", filter: "unused" });
+            message.success(`已生成 ${payload.codes.length} 个 CDK`);
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "生成 CDK 失败");
+        } finally {
+            setCdkGenerating(false);
+        }
+    };
+
+    const deleteCdkById = async (id: string) => {
+        try {
+            const response = await fetch(`/api/admin/cdk/${id}`, { method: "DELETE" });
+            const payload = (await response.json().catch(() => ({}))) as { error?: string };
+            if (!response.ok) throw new Error(payload.error || "删除 CDK 失败");
+            setCreatedCdkCodes((current) => current.filter((code) => code.id !== id));
+            setSelectedCreatedCdkIds((current) => current.filter((item) => item !== id));
+            setSelectedCdkIds((current) => current.filter((item) => item !== id));
+            await loadCdkCodes();
+            message.success("CDK 已删除");
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "删除 CDK 失败");
+        }
+    };
+
+    const deleteCreatedCdkCodes = async (ids: string[]) => {
+        const deletingIds = Array.from(new Set(ids)).filter(Boolean);
+        if (!deletingIds.length) return;
+        try {
+            const response = await fetch("/api/admin/cdk", {
+                method: "DELETE",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ ids: deletingIds }),
+            });
+            const payload = (await response.json().catch(() => ({}))) as { deleted?: number; error?: string };
+            if (!response.ok) throw new Error(payload.error || "删除 CDK 失败");
+            setCreatedCdkCodes((current) => current.filter((code) => !deletingIds.includes(code.id)));
+            setSelectedCreatedCdkIds((current) => current.filter((id) => !deletingIds.includes(id)));
+            setSelectedCdkIds((current) => current.filter((id) => !deletingIds.includes(id)));
+            await loadCdkCodes();
+            message.success(`已删除 ${payload.deleted ?? deletingIds.length} 个 CDK`);
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "删除 CDK 失败");
+        }
+    };
+
+    const bulkDeleteCdkCodes = async () => {
+        const ids = Array.from(new Set(selectedCdkIds));
+        if (!ids.length || bulkDeletingCdk) return;
+        setBulkDeletingCdk(true);
+        try {
+            const response = await fetch("/api/admin/cdk", {
+                method: "DELETE",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ ids }),
+            });
+            const payload = (await response.json().catch(() => ({}))) as { deleted?: number; error?: string };
+            if (!response.ok) throw new Error(payload.error || "批量删除 CDK 失败");
+            setSelectedCdkIds([]);
+            setCreatedCdkCodes((current) => current.filter((code) => !ids.includes(code.id)));
+            setSelectedCreatedCdkIds((current) => current.filter((id) => !ids.includes(id)));
+            await loadCdkCodes();
+            message.success(`已删除 ${payload.deleted ?? ids.length} 个 CDK`);
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "批量删除 CDK 失败");
+        } finally {
+            setBulkDeletingCdk(false);
+        }
+    };
+
+    const copyCreatedCdkCodes = async (codes = createdCdkActionCodes) => {
+        if (!codes.length) return;
+        try {
+            await navigator.clipboard.writeText(codes.map((code) => code.code).join("\n"));
+            message.success(`已复制 ${codes.length} 个 CDK`);
+        } catch {
+            message.error("复制失败，请手动复制明文 CDK");
+        }
+    };
+
+    const copyCdkPlainCode = async (code: PublicCdkCode) => {
+        if (!code.code) {
+            message.warning("这个 CDK 没有可复制的明文");
+            return;
+        }
+        try {
+            await navigator.clipboard.writeText(code.code);
+            message.success("已复制 CDK 明文");
+        } catch {
+            message.error("复制失败，请手动复制明文 CDK");
+        }
+    };
+
+    const exportCreatedCdkCodes = (codes = createdCdkActionCodes) => {
+        if (!codes.length) return;
+        const text = formatCreatedCdkExport(codes);
+        downloadTextFile(`vozeb-cdk-${dayjs().format("YYYYMMDD-HHmmss")}.txt`, text);
+        message.success(`已导出 ${codes.length} 个 CDK`);
+    };
+
+    const loadAnnouncements = async () => {
+        setAnnouncementsLoading(true);
+        try {
+            const response = await fetch("/api/admin/announcements", { cache: "no-store" });
+            const payload = (await response.json()) as { announcements?: PublicAnnouncement[]; error?: string };
+            if (!response.ok || !payload.announcements) throw new Error(payload.error || "加载公告失败");
+            setAnnouncements(payload.announcements);
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "加载公告失败");
+        } finally {
+            setAnnouncementsLoading(false);
+        }
+    };
+
+    const saveAnnouncementDraft = async () => {
+        setAnnouncementSaving(true);
+        try {
+            const response = await fetch("/api/admin/announcements", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(announcementDraft),
+            });
+            const payload = (await response.json()) as { announcement?: PublicAnnouncement; error?: string };
+            if (!response.ok || !payload.announcement) throw new Error(payload.error || "保存公告失败");
+            setAnnouncementDraft({ title: "", content: "", enabled: true, popupHome: false, popupAfterLogin: false });
+            await loadAnnouncements();
+            message.success("公告已发布");
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "保存公告失败");
+        } finally {
+            setAnnouncementSaving(false);
+        }
+    };
+
+    const updateAnnouncementById = async (announcement: PublicAnnouncement, patch: Partial<PublicAnnouncement>) => {
+        try {
+            const response = await fetch(`/api/admin/announcements/${announcement.id}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(patch),
+            });
+            const payload = (await response.json()) as { announcement?: PublicAnnouncement; error?: string };
+            if (!response.ok || !payload.announcement) throw new Error(payload.error || "更新公告失败");
+            setAnnouncements((current) => current.map((item) => (item.id === payload.announcement!.id ? payload.announcement! : item)));
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "更新公告失败");
+        }
+    };
+
+    const deleteAnnouncementById = async (id: string) => {
+        try {
+            const response = await fetch(`/api/admin/announcements/${id}`, { method: "DELETE" });
+            const payload = (await response.json().catch(() => ({}))) as { error?: string };
+            if (!response.ok) throw new Error(payload.error || "删除公告失败");
+            setAnnouncements((current) => current.filter((item) => item.id !== id));
+            message.success("公告已删除");
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "删除公告失败");
+        }
+    };
+
     const updateChannel = (id: string, patch: Partial<SystemModelChannel>) => {
         setSettings((current) => ({
             ...current,
@@ -617,6 +877,16 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
         }));
     };
 
+    const updateGenerationDefaults = (key: keyof AuthSettings["generationDefaults"], value: number | null) => {
+        setSettings((current) => ({
+            ...current,
+            generationDefaults: {
+                ...current.generationDefaults,
+                [key]: clampInteger(value, 1, 10, 1),
+            },
+        }));
+    };
+
     const updateGenerationAssetStorage = (key: keyof AuthSettings["generationAssetStorage"], value: boolean) => {
         setSettings((current) => ({
             ...current,
@@ -625,6 +895,62 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                 [key]: value,
             },
         }));
+    };
+
+    const updateWebdavSetting = <K extends keyof AuthSettings["webdav"]>(key: K, value: AuthSettings["webdav"][K]) => {
+        setSettings((current) => ({ ...current, webdav: { ...current.webdav, [key]: value } }));
+    };
+
+    const testWebdavSettings = async () => {
+        setWebdavTesting(true);
+        try {
+            await saveSettings({ webdav: settings.webdav }, "WebDAV 设置已保存");
+            const response = await fetch("/api/admin/webdav/test", { method: "POST" });
+            const payload = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+            if (!response.ok || !payload.ok) throw new Error(payload.error || "WebDAV 连接失败");
+            message.success("WebDAV 连接可用");
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "WebDAV 连接失败");
+        } finally {
+            setWebdavTesting(false);
+        }
+    };
+
+    const startWebdavSync = async () => {
+        if (webdavSyncing) return;
+        if (!settings.webdav.enabled || !settings.webdav.url.trim()) {
+            message.warning("请先开启并填写 WebDAV 地址");
+            return;
+        }
+        setWebdavSyncing(true);
+        setWebdavSyncSummary("");
+        setWebdavSyncProgress([{ id: "start", text: "准备同步当前浏览器的本地数据", status: "active" }]);
+        try {
+            await saveSettings({ webdav: settings.webdav }, "WebDAV 设置已保存");
+            const { syncAppDataToWebdav } = await import("@/services/app-sync");
+            const result = await syncAppDataToWebdav(
+                {
+                    proxyMode: "nextjs",
+                    url: "/api/webdav",
+                    username: "",
+                    password: "",
+                    directory: "",
+                    lastSyncedAt: "",
+                },
+                (event) => {
+                    const text = [event.label, event.stage, event.total ? `${event.current || 0}/${event.total}` : ""].filter(Boolean).join(" · ");
+                    setWebdavSyncProgress((current) => [...current.slice(-7), { id: `${Date.now()}-${current.length}`, text, status: event.status }]);
+                },
+            );
+            setWebdavSyncSummary(`同步完成：画布 ${result.projects} 个，素材 ${result.assets} 个，生图记录 ${result.imageLogs} 条，视频记录 ${result.videoLogs} 条，上传文件 ${result.uploadedFiles} 个。`);
+            message.success("当前浏览器数据同步完成");
+        } catch (error) {
+            const text = error instanceof Error ? error.message : "WebDAV 同步失败";
+            setWebdavSyncProgress((current) => [...current.slice(-7), { id: `${Date.now()}-error`, text, status: "exception" }]);
+            message.error(text);
+        } finally {
+            setWebdavSyncing(false);
+        }
     };
 
     const updateModelPointCost = (model: string, value: number | null) => {
@@ -1089,18 +1415,108 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
             ),
         },
     ];
+    const cdkColumns: TableColumnsType<PublicCdkCode> = [
+        {
+            title: "CDK",
+            dataIndex: "codePreview",
+            width: 390,
+            render: (_, code) => (
+                <div className="min-w-0 space-y-2">
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                        <span className="min-w-0 max-w-full truncate font-mono text-sm font-semibold text-stone-950 dark:text-stone-100">{code.code || "CDK"}</span>
+                        <Tag className="m-0" color={cdkStatusTone(code)}>
+                            {cdkStatusLabel(code)}
+                        </Tag>
+                    </div>
+                    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-stone-500 dark:text-stone-400">
+                        <Button className="h-6 px-1.5 text-xs" size="small" type="text" icon={<Copy className="size-3.5" />} onClick={() => void copyCdkPlainCode(code)}>
+                            复制
+                        </Button>
+                        {code.note ? <span className="min-w-0 max-w-full truncate">备注：{code.note}</span> : null}
+                    </div>
+                </div>
+            ),
+        },
+        {
+            title: "兑换规则",
+            width: 190,
+            render: (_, code) => (
+                <div className="text-sm leading-6 text-stone-700 dark:text-stone-200">
+                    <div>{formatCreditAmount(code.points)} 积分</div>
+                    <div className="text-xs text-stone-500 dark:text-stone-400">
+                        已兑 {code.redeemedCount}/{code.maxRedemptions}
+                    </div>
+                </div>
+            ),
+        },
+        {
+            title: "最近兑换",
+            width: 260,
+            render: (_, code) => {
+                const latest = [...code.redemptions].sort((a, b) => Date.parse(b.redeemedAt) - Date.parse(a.redeemedAt))[0];
+                if (!latest) return <span className="text-sm text-stone-500 dark:text-stone-400">暂无兑换</span>;
+                return (
+                    <div className="min-w-0 text-sm leading-6 text-stone-700 dark:text-stone-200">
+                        <div className="truncate font-medium">
+                            {latest.displayName}
+                            <span className="ml-1 font-normal text-stone-500 dark:text-stone-400">@{latest.username}</span>
+                        </div>
+                        <div className="text-xs text-stone-500 dark:text-stone-400">{new Date(latest.redeemedAt).toLocaleString("zh-CN")}</div>
+                    </div>
+                );
+            },
+        },
+        {
+            title: "有效期",
+            width: 190,
+            render: (_, code) => (
+                <div className="text-sm text-stone-700 dark:text-stone-200">
+                    {code.expiresAt ? (
+                        <>
+                            <div>{new Date(code.expiresAt).toLocaleString("zh-CN")}</div>
+                            <div className="text-xs text-stone-500 dark:text-stone-400">创建 {new Date(code.createdAt).toLocaleDateString("zh-CN")}</div>
+                        </>
+                    ) : (
+                        <>
+                            <div>长期有效</div>
+                            <div className="text-xs text-stone-500 dark:text-stone-400">创建 {new Date(code.createdAt).toLocaleDateString("zh-CN")}</div>
+                        </>
+                    )}
+                </div>
+            ),
+        },
+        {
+            title: "操作",
+            width: 200,
+            fixed: "right",
+            render: (_, code) => (
+                <Space size={6} wrap>
+                    <Button size="small" type="text" icon={<Eye className="size-3.5" />} onClick={() => setViewingCdkCode(code)}>
+                        明细
+                    </Button>
+                    <Popconfirm title="删除这个 CDK？" description="删除后用户将不能再兑换这个密钥，已有积分流水不会被删除。" okText="删除" cancelText="取消" onConfirm={() => void deleteCdkById(code.id)}>
+                        <Button size="small" danger icon={<Trash2 className="size-3.5" />}>
+                            删除
+                        </Button>
+                    </Popconfirm>
+                </Space>
+            ),
+        },
+    ];
     const activeSectionInfo = adminSections.find((section) => section.key === activeSection) || adminSections[0];
 
     return (
         <div className="admin-mobile-safe grid min-w-0 gap-5 xl:grid-cols-[220px_minmax(0,1fr)]">
             <AdminSectionNav activeKey={activeSection} onChange={setActiveSection} />
             <div className="min-w-0 space-y-5">
-                <div className="flex flex-col gap-1 rounded-lg border border-stone-200 bg-white px-4 py-3 shadow-sm shadow-stone-200/40 dark:border-stone-800 dark:bg-stone-950 dark:shadow-black/20">
-                    <div className="flex items-center gap-2 text-sm font-semibold text-stone-950 dark:text-stone-100">
-                        {activeSectionInfo.icon}
-                        <span>{activeSectionInfo.label}</span>
+                <div className="rounded-lg border border-stone-200 bg-white px-5 py-4 shadow-sm shadow-stone-200/40 dark:border-stone-800 dark:bg-stone-950 dark:shadow-black/20">
+                    <div className="flex items-start gap-3">
+                        <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-stone-950 text-white dark:bg-white dark:text-stone-950">{activeSectionInfo.icon}</span>
+                        <div className="min-w-0">
+                            <div className="text-lg font-semibold leading-7 text-stone-950 dark:text-stone-100">{activeSectionInfo.label}</div>
+                            <p className="mt-1 text-sm leading-6 text-stone-500 dark:text-stone-400">{activeSectionInfo.description}</p>
+                        </div>
                     </div>
-                    <p className="text-sm leading-6 text-stone-500 dark:text-stone-400">{activeSectionInfo.description}</p>
                 </div>
 
                 {activeSection === "overview" ? (
@@ -1424,9 +1840,11 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                                                     modelPointCosts: settings.modelPointCosts,
                                                     generationPointMultipliers: settings.generationPointMultipliers,
                                                     generationConcurrency: settings.generationConcurrency,
+                                                    generationDefaults: settings.generationDefaults,
                                                     generationAssetStorage: settings.generationAssetStorage,
+                                                    webdav: settings.webdav,
                                                 },
-                                                "账号、邮箱、积分、并发与兜底设置已保存",
+                                                "账号、邮箱、积分、生成默认值、兜底与 WebDAV 设置已保存",
                                             )
                                         }
                                     >
@@ -1504,7 +1922,9 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                                 </div>
                                 <div className="space-y-4">
                                     <GenerationConcurrencyPanel settings={settings} onChange={updateGenerationConcurrency} />
+                                    <GenerationDefaultsPanel settings={settings} onChange={updateGenerationDefaults} />
                                     <GenerationAssetStoragePanel settings={settings} onChange={updateGenerationAssetStorage} />
+                                    <WebdavSettingsPanel settings={settings} testing={webdavTesting} syncing={webdavSyncing} onChange={updateWebdavSetting} onTest={() => void testWebdavSettings()} onOpenSync={() => setWebdavSyncOpen(true)} />
                                 </div>
                             </div>
                             <QuotaRuleTable
@@ -1520,13 +1940,7 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                                 onGenerationPointMultiplierDelete={deleteGenerationPointMultiplier}
                             />
                             <div className="flex flex-col gap-3 rounded-lg border border-stone-200 bg-stone-50/70 p-3 xl:flex-row xl:items-center xl:justify-between dark:border-stone-800 dark:bg-stone-900/40">
-                                <SettingInlineToggle
-                                    title="允许用户自配接口"
-                                    checked={settings.allowUserApiConfig}
-                                    checkedChildren="允许"
-                                    unCheckedChildren="禁止"
-                                    onChange={(allowUserApiConfig) => setSettings((current) => ({ ...current, allowUserApiConfig }))}
-                                />
+                                <div className="text-sm leading-6 text-stone-600 dark:text-stone-300">用户端不再显示接口配置，所有模型与上游地址统一由管理员在这里匹配。</div>
                                 <div className="flex w-full flex-wrap gap-2 xl:w-auto xl:justify-end">
                                     <Button icon={<RefreshCw className="size-4" />} loading={fetchingModelId === "all"} onClick={() => void fetchAllModels()}>
                                         拉取全部模型
@@ -1534,12 +1948,7 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                                     <Button icon={<Plus className="size-4" />} onClick={addChannel}>
                                         新增渠道
                                     </Button>
-                                    <Button
-                                        type="primary"
-                                        loading={settingsLoading}
-                                        icon={<Save className="size-4" />}
-                                        onClick={() => saveSettings({ systemChannels: settings.systemChannels, defaultModels: settings.defaultModels, allowUserApiConfig: settings.allowUserApiConfig }, "通用接口已保存")}
-                                    >
+                                    <Button type="primary" loading={settingsLoading} icon={<Save className="size-4" />} onClick={() => saveSettings({ systemChannels: settings.systemChannels, defaultModels: settings.defaultModels }, "通用接口已保存")}>
                                         保存接口设置
                                     </Button>
                                 </div>
@@ -1578,6 +1987,389 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                                     </div>
                                 </div>
                             </div>
+                        </div>
+                    </Panel>
+                ) : null}
+
+                {activeSection === "cdk" ? (
+                    <Panel>
+                        <PanelHeader
+                            title="CDK 管理"
+                            description="随机生成积分兑换密钥，用户可在前端积分面板中兑换；后台可复制、导出、查看兑换明细并删除密钥。"
+                            actions={
+                                <Button icon={<RefreshCw className="size-4" />} loading={cdkLoading} onClick={() => void loadCdkCodes()}>
+                                    刷新
+                                </Button>
+                            }
+                        />
+                        <div className="space-y-5 p-4 sm:p-5">
+                            <div className="grid items-start gap-4 xl:grid-cols-[minmax(360px,0.85fr)_minmax(0,1.15fr)]">
+                                <section className="rounded-lg border border-stone-200 bg-stone-50/70 p-4 dark:border-stone-800 dark:bg-stone-900/40">
+                                    <SectionTitle icon={<KeyRound className="size-4" />} title="生成 CDK" />
+                                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                                        <LabeledControl label="生成数量">
+                                            <InputNumber className="w-full" min={1} max={100} precision={0} value={cdkForm.count} onChange={(value) => setCdkForm((current) => ({ ...current, count: clampInteger(value, 1, 100, 1) }))} />
+                                        </LabeledControl>
+                                        <LabeledControl label="每次兑换积分">
+                                            <InputNumber className="w-full" min={0} precision={0} value={cdkForm.points} onChange={(value) => setCdkForm((current) => ({ ...current, points: toNumberOrZero(value) }))} />
+                                        </LabeledControl>
+                                        <LabeledControl label="每个密钥可兑换次数">
+                                            <InputNumber
+                                                className="w-full"
+                                                min={1}
+                                                max={10000}
+                                                precision={0}
+                                                value={cdkForm.maxRedemptions}
+                                                onChange={(value) => setCdkForm((current) => ({ ...current, maxRedemptions: clampInteger(value, 1, 10000, 1) }))}
+                                            />
+                                        </LabeledControl>
+                                        <LabeledControl label="有效天数">
+                                            <InputNumber
+                                                className="w-full"
+                                                min={1}
+                                                max={3650}
+                                                precision={0}
+                                                value={cdkForm.expiresInDays}
+                                                placeholder="留空为永久"
+                                                onChange={(value) => setCdkForm((current) => ({ ...current, expiresInDays: value === null ? null : clampInteger(value, 1, 3650, 1) }))}
+                                            />
+                                            <div className="mt-1.5 text-xs leading-5 text-stone-500 dark:text-stone-400">留空就是长期有效；填写数字表示从生成时间起多少天后过期。</div>
+                                        </LabeledControl>
+                                        <div className="sm:col-span-2">
+                                            <LabeledControl label="备注">
+                                                <Input value={cdkForm.note} maxLength={120} placeholder="例如：活动赠送 / 测试兑换" onChange={(event) => setCdkForm((current) => ({ ...current, note: event.target.value }))} />
+                                            </LabeledControl>
+                                        </div>
+                                    </div>
+                                    <div className="mt-5 flex justify-end">
+                                        <Button className="w-full sm:w-auto" type="primary" icon={<Gift className="size-4" />} loading={cdkGenerating} onClick={() => void generateCdkCodes()}>
+                                            随机生成 CDK
+                                        </Button>
+                                    </div>
+                                </section>
+                                <section className="rounded-lg border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-950">
+                                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                        <div className="min-w-0">
+                                            <SectionTitle icon={<ShieldCheck className="size-4" />} title="本次生成结果" />
+                                            <p className="mt-2 text-xs leading-5 text-stone-500 dark:text-stone-400">新生成会显示完整明文；删除后会从密钥管理移除，用户不能再兑换。</p>
+                                        </div>
+                                        <div className="flex shrink-0 flex-wrap gap-2">
+                                            <Button size="small" disabled={!createdCdkActionCodes.length} onClick={() => void copyCreatedCdkCodes()}>
+                                                {selectedCreatedCdkCodes.length ? "复制选中" : "复制全部"}
+                                            </Button>
+                                            <Button size="small" icon={<Download className="size-3.5" />} disabled={!createdCdkActionCodes.length} onClick={() => exportCreatedCdkCodes()}>
+                                                {selectedCreatedCdkCodes.length ? "导出选中" : "导出 TXT"}
+                                            </Button>
+                                            <Popconfirm
+                                                title={selectedCreatedCdkCodes.length ? "删除选中的 CDK？" : "删除本次生成的 CDK？"}
+                                                description="删除后这些密钥不能再兑换，也不会继续显示在密钥管理里。建议先复制或导出明文。"
+                                                okText="删除"
+                                                cancelText="取消"
+                                                onConfirm={() => void deleteCreatedCdkCodes(createdCdkActionCodes.map((code) => code.id))}
+                                            >
+                                                <Button size="small" danger icon={<Trash2 className="size-3.5" />} disabled={!createdCdkActionCodes.length}>
+                                                    {selectedCreatedCdkCodes.length ? "删除选中" : "删除本次"}
+                                                </Button>
+                                            </Popconfirm>
+                                        </div>
+                                    </div>
+                                    {createdCdkCodes.length ? (
+                                        <div className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-md border border-stone-200 bg-stone-50/80 px-3 py-2 text-sm dark:border-stone-800 dark:bg-stone-900/40">
+                                            <Checkbox
+                                                checked={allCreatedCdkSelected}
+                                                indeterminate={Boolean(selectedCreatedCdkIds.length) && !allCreatedCdkSelected}
+                                                onChange={(event) => setSelectedCreatedCdkIds(event.target.checked ? createdCdkCodes.map((code) => code.id) : [])}
+                                            >
+                                                全选当前结果
+                                            </Checkbox>
+                                            <span className="text-xs text-stone-500 dark:text-stone-400">
+                                                已选 {selectedCreatedCdkIds.length} 个 / 共 {createdCdkCodes.length} 个；新生成会追加在顶部并自动选中
+                                            </span>
+                                        </div>
+                                    ) : null}
+                                    <div className="mt-4 max-h-72 space-y-2 overflow-y-auto">
+                                        {createdCdkCodes.length ? (
+                                            createdCdkCodes.map((code) => (
+                                                <div key={code.id} className="grid gap-3 rounded-md border border-stone-200 p-3 dark:border-stone-800 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center">
+                                                    <Checkbox
+                                                        checked={selectedCreatedCdkIds.includes(code.id)}
+                                                        onChange={(event) => setSelectedCreatedCdkIds((current) => (event.target.checked ? Array.from(new Set([...current, code.id])) : current.filter((id) => id !== code.id)))}
+                                                        aria-label={`选择 ${code.codePreview}`}
+                                                    />
+                                                    <div className="min-w-0">
+                                                        <div className="break-all font-mono text-sm font-semibold text-stone-900 dark:text-stone-100">{code.code}</div>
+                                                        <div className="mt-1 text-xs text-stone-500 dark:text-stone-400">
+                                                            {formatCreditAmount(code.points)} 积分 / 可兑 {code.maxRedemptions} 次{code.expiresAt ? ` / ${new Date(code.expiresAt).toLocaleDateString("zh-CN")} 过期` : " / 长期有效"}
+                                                        </div>
+                                                    </div>
+                                                    <Space size={6}>
+                                                        <Button size="small" onClick={() => void navigator.clipboard?.writeText(code.code).then(() => message.success("已复制 CDK"))}>
+                                                            复制
+                                                        </Button>
+                                                        <Popconfirm title="删除这个 CDK？" description="删除后会从密钥管理移除，用户不能再兑换。" okText="删除" cancelText="取消" onConfirm={() => void deleteCreatedCdkCodes([code.id])}>
+                                                            <Button size="small" danger icon={<Trash2 className="size-3.5" />}>
+                                                                删除
+                                                            </Button>
+                                                        </Popconfirm>
+                                                    </Space>
+                                                </div>
+                                            ))
+                                        ) : (
+                                            <div className="rounded-md border border-dashed border-stone-200 px-3 py-10 text-center text-sm text-stone-500 dark:border-stone-800">生成后会在这里显示明文，请及时复制。</div>
+                                        )}
+                                    </div>
+                                </section>
+                            </div>
+                            <section className="rounded-lg border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-950">
+                                <div className="mb-4 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+                                    <div className="min-w-0">
+                                        <SectionTitle icon={<Database className="size-4" />} title="CDK 密钥管理" />
+                                        <p className="mt-2 text-xs leading-5 text-stone-500 dark:text-stone-400">这里管理的是可兑换密钥本身；可搜索、复制、查看明细、勾选批量删除，已兑换流水会保留在用户积分记录中。</p>
+                                        <div className="mt-2 flex flex-wrap gap-2 text-xs text-stone-500 dark:text-stone-400">
+                                            <Tag className="m-0">总数 {cdkStats.total}</Tag>
+                                            <Tag className="m-0">已兑换 {cdkStats.redeemed}</Tag>
+                                            <Tag className="m-0">未兑换 {cdkStats.unused}</Tag>
+                                            <Tag className="m-0">已过期 {cdkStats.expired}</Tag>
+                                        </div>
+                                    </div>
+                                    <div className="flex w-full flex-col gap-2 xl:w-auto xl:min-w-[520px] xl:flex-row xl:justify-end">
+                                        <Input
+                                            allowClear
+                                            className="w-full xl:max-w-64"
+                                            prefix={<Search className="size-4 text-stone-400" />}
+                                            placeholder="搜索明文、备注、兑换用户"
+                                            value={cdkSearch}
+                                            onChange={(event) => {
+                                                setCdkSearch(event.target.value);
+                                                setCdkPage(1);
+                                            }}
+                                        />
+                                        <Select
+                                            className="w-full xl:w-36"
+                                            value={cdkFilter}
+                                            onChange={(value) => {
+                                                setCdkFilter(value);
+                                                setCdkPage(1);
+                                            }}
+                                            options={[
+                                                { value: "all", label: "全部" },
+                                                { value: "redeemed", label: "已兑换" },
+                                                { value: "unused", label: "未兑换" },
+                                                { value: "expired", label: "已过期" },
+                                            ]}
+                                        />
+                                        <Popconfirm title="批量删除选中 CDK？" description="删除后用户将不能再兑换这些密钥，已有积分流水不会被删除。" okText="删除" cancelText="取消" onConfirm={() => void bulkDeleteCdkCodes()}>
+                                            <Button danger disabled={!selectedCdkIds.length} loading={bulkDeletingCdk} icon={<Trash2 className="size-4" />}>
+                                                批量删除
+                                            </Button>
+                                        </Popconfirm>
+                                    </div>
+                                </div>
+                                <div className="rounded-lg border border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-950">
+                                    <div className="md:hidden">
+                                        {cdkLoading ? (
+                                            <div className="px-3 py-8 text-center text-sm text-stone-500 dark:text-stone-400">加载中...</div>
+                                        ) : cdkCodes.length ? (
+                                            <div className="divide-y divide-stone-200 dark:divide-stone-800">
+                                                {cdkCodes.map((code) => {
+                                                    const latest = [...code.redemptions].sort((a, b) => Date.parse(b.redeemedAt) - Date.parse(a.redeemedAt))[0];
+                                                    const selected = selectedCdkIds.includes(code.id);
+                                                    return (
+                                                        <article key={code.id} className="space-y-3 px-3 py-4">
+                                                            <div className="flex min-w-0 items-start gap-2">
+                                                                <Checkbox
+                                                                    className="mt-0.5 shrink-0"
+                                                                    checked={selected}
+                                                                    onChange={(event) => setSelectedCdkIds((current) => (event.target.checked ? Array.from(new Set([...current, code.id])) : current.filter((id) => id !== code.id)))}
+                                                                    aria-label={`选择 ${code.code}`}
+                                                                />
+                                                                <div className="min-w-0 flex-1">
+                                                                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                                                                        <span className="min-w-0 max-w-full break-all font-mono text-sm font-semibold leading-5 text-stone-950 dark:text-stone-100">{code.code || "CDK"}</span>
+                                                                        <Tag className="m-0" color={cdkStatusTone(code)}>
+                                                                            {cdkStatusLabel(code)}
+                                                                        </Tag>
+                                                                    </div>
+                                                                    {code.note ? <div className="mt-1 text-xs leading-5 text-stone-500 dark:text-stone-400">备注：{code.note}</div> : null}
+                                                                </div>
+                                                            </div>
+                                                            <div className="grid grid-cols-2 gap-2 rounded-md bg-stone-50/80 p-3 text-xs leading-5 dark:bg-stone-900/50">
+                                                                <div>
+                                                                    <div className="text-stone-400 dark:text-stone-500">兑换规则</div>
+                                                                    <div className="mt-0.5 font-medium text-stone-800 dark:text-stone-100">
+                                                                        {formatCreditAmount(code.points)} 积分 · {code.redeemedCount}/{code.maxRedemptions}
+                                                                    </div>
+                                                                </div>
+                                                                <div>
+                                                                    <div className="text-stone-400 dark:text-stone-500">有效期</div>
+                                                                    <div className="mt-0.5 font-medium text-stone-800 dark:text-stone-100">{code.expiresAt ? new Date(code.expiresAt).toLocaleDateString("zh-CN") : "长期有效"}</div>
+                                                                </div>
+                                                                <div className="col-span-2">
+                                                                    <div className="text-stone-400 dark:text-stone-500">最近兑换</div>
+                                                                    <div className="mt-0.5 truncate font-medium text-stone-800 dark:text-stone-100">{latest ? `${latest.displayName} @${latest.username}` : "暂无兑换"}</div>
+                                                                </div>
+                                                            </div>
+                                                            <div className="flex flex-wrap justify-end gap-2">
+                                                                <Button size="small" icon={<Copy className="size-3.5" />} onClick={() => void copyCdkPlainCode(code)}>
+                                                                    复制
+                                                                </Button>
+                                                                <Button size="small" type="text" icon={<Eye className="size-3.5" />} onClick={() => setViewingCdkCode(code)}>
+                                                                    明细
+                                                                </Button>
+                                                                <Popconfirm title="删除这个 CDK？" okText="删除" cancelText="取消" onConfirm={() => void deleteCdkById(code.id)}>
+                                                                    <Button size="small" danger icon={<Trash2 className="size-3.5" />}>
+                                                                        删除
+                                                                    </Button>
+                                                                </Popconfirm>
+                                                            </div>
+                                                        </article>
+                                                    );
+                                                })}
+                                            </div>
+                                        ) : (
+                                            <div className="px-3 py-8 text-center text-sm text-stone-500 dark:text-stone-400">暂无符合条件的 CDK</div>
+                                        )}
+                                    </div>
+                                    <div className="hidden md:block">
+                                        <Table
+                                            rowKey="id"
+                                            columns={cdkColumns}
+                                            dataSource={cdkCodes}
+                                            loading={cdkLoading}
+                                            pagination={false}
+                                            scroll={{ x: 1080 }}
+                                            rowSelection={{
+                                                selectedRowKeys: selectedCdkIds,
+                                                onChange: (keys) => setSelectedCdkIds(keys.map(String)),
+                                            }}
+                                            locale={{ emptyText: "暂无符合条件的 CDK" }}
+                                        />
+                                    </div>
+                                    <div className="flex flex-col gap-3 border-t border-stone-200 px-3 py-3 sm:flex-row sm:items-center sm:justify-between dark:border-stone-800">
+                                        <div className="text-sm text-stone-500 dark:text-stone-400">
+                                            已选 <span className="font-semibold text-stone-950 dark:text-stone-100">{selectedCdkIds.length}</span> 个，当前页 <span className="font-semibold text-stone-950 dark:text-stone-100">{cdkCodes.length}</span>{" "}
+                                            条，共 <span className="font-semibold text-stone-950 dark:text-stone-100">{cdkTotal}</span> 条
+                                        </div>
+                                        <Pagination current={cdkPage} pageSize={CDK_PAGE_SIZE} total={cdkTotal} showSizeChanger={false} onChange={(page) => setCdkPage(page)} />
+                                    </div>
+                                </div>
+                            </section>
+                        </div>
+                    </Panel>
+                ) : null}
+
+                {activeSection === "announcements" ? (
+                    <Panel>
+                        <PanelHeader
+                            title="网站公告"
+                            description="发布网站公告记录，并可设置首页弹窗或登录后弹窗提醒。"
+                            actions={
+                                <div className="flex w-full flex-wrap justify-end gap-2 sm:w-auto">
+                                    <Button icon={<ExternalLink className="size-4" />} href="/announcements" target="_blank">
+                                        前台公告
+                                    </Button>
+                                    <Button icon={<RefreshCw className="size-4" />} loading={announcementsLoading} onClick={() => void loadAnnouncements()}>
+                                        刷新
+                                    </Button>
+                                </div>
+                            }
+                        />
+                        <div className="space-y-5 p-4 sm:p-5">
+                            <section className="rounded-lg border border-stone-200 bg-stone-50/70 p-4 dark:border-stone-800 dark:bg-stone-900/40">
+                                <SectionTitle icon={<Megaphone className="size-4" />} title="发布公告" />
+                                <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px_220px]">
+                                    <LabeledControl label="标题">
+                                        <Input value={announcementDraft.title} maxLength={80} placeholder="例如：维护通知" onChange={(event) => setAnnouncementDraft((current) => ({ ...current, title: event.target.value }))} />
+                                    </LabeledControl>
+                                    <LabeledControl label="开始时间">
+                                        <DatePicker
+                                            className="w-full"
+                                            classNames={{ popup: { root: "admin-date-picker-dropdown" } }}
+                                            showTime
+                                            allowClear
+                                            value={announcementDraft.startsAt ? dayjs(announcementDraft.startsAt) : null}
+                                            onChange={(value) => setAnnouncementDraft((current) => ({ ...current, startsAt: value?.toISOString() || undefined }))}
+                                        />
+                                    </LabeledControl>
+                                    <LabeledControl label="结束时间">
+                                        <DatePicker
+                                            className="w-full"
+                                            classNames={{ popup: { root: "admin-date-picker-dropdown" } }}
+                                            showTime
+                                            allowClear
+                                            value={announcementDraft.endsAt ? dayjs(announcementDraft.endsAt) : null}
+                                            onChange={(value) => setAnnouncementDraft((current) => ({ ...current, endsAt: value?.toISOString() || undefined }))}
+                                        />
+                                    </LabeledControl>
+                                    <div className="lg:col-span-3">
+                                        <LabeledControl label="公告内容">
+                                            <Input.TextArea
+                                                value={announcementDraft.content}
+                                                rows={5}
+                                                maxLength={3000}
+                                                placeholder="写入公告正文，支持换行。"
+                                                onChange={(event) => setAnnouncementDraft((current) => ({ ...current, content: event.target.value }))}
+                                            />
+                                        </LabeledControl>
+                                    </div>
+                                </div>
+                                <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                    <div className="flex flex-wrap gap-3">
+                                        <Checkbox checked={announcementDraft.enabled !== false} onChange={(event) => setAnnouncementDraft((current) => ({ ...current, enabled: event.target.checked }))}>
+                                            启用展示
+                                        </Checkbox>
+                                        <Checkbox checked={announcementDraft.popupHome === true} onChange={(event) => setAnnouncementDraft((current) => ({ ...current, popupHome: event.target.checked }))}>
+                                            首页弹窗
+                                        </Checkbox>
+                                        <Checkbox checked={announcementDraft.popupAfterLogin === true} onChange={(event) => setAnnouncementDraft((current) => ({ ...current, popupAfterLogin: event.target.checked }))}>
+                                            登录后弹窗
+                                        </Checkbox>
+                                    </div>
+                                    <Button type="primary" loading={announcementSaving} icon={<Save className="size-4" />} onClick={() => void saveAnnouncementDraft()}>
+                                        发布公告
+                                    </Button>
+                                </div>
+                            </section>
+                            <section className="rounded-lg border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-950">
+                                <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                                    <SectionTitle icon={<Database className="size-4" />} title="公告记录" />
+                                    <Tag className="m-0 w-fit">共 {announcements.length} 条</Tag>
+                                </div>
+                                <div className="grid gap-3">
+                                    {announcements.map((announcement) => (
+                                        <div key={announcement.id} className="rounded-lg border border-stone-200 bg-stone-50/70 p-4 dark:border-stone-800 dark:bg-stone-900/40">
+                                            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                                                <div className="min-w-0">
+                                                    <div className="flex flex-wrap items-center gap-2">
+                                                        <h3 className="text-base font-semibold text-stone-950 dark:text-stone-100">{announcement.title}</h3>
+                                                        <Tag color={announcement.enabled ? "green" : "default"} className="m-0">
+                                                            {announcement.enabled ? "展示中" : "已停用"}
+                                                        </Tag>
+                                                        {announcement.popupHome ? <Tag className="m-0">首页弹窗</Tag> : null}
+                                                        {announcement.popupAfterLogin ? <Tag className="m-0">登录弹窗</Tag> : null}
+                                                    </div>
+                                                    <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-stone-600 dark:text-stone-300">{announcement.content}</p>
+                                                    <div className="mt-2 text-xs text-stone-500 dark:text-stone-400">{new Date(announcement.createdAt).toLocaleString("zh-CN")}</div>
+                                                </div>
+                                                <Space wrap className="shrink-0 lg:justify-end">
+                                                    <Button size="small" href={`/announcements#${announcement.id}`} target="_blank" icon={<ExternalLink className="size-3.5" />}>
+                                                        查看
+                                                    </Button>
+                                                    <Switch checked={announcement.enabled} checkedChildren="展示" unCheckedChildren="停用" onChange={(enabled) => void updateAnnouncementById(announcement, { enabled })} />
+                                                    <Switch checked={announcement.popupHome} checkedChildren="首页" unCheckedChildren="首页" onChange={(popupHome) => void updateAnnouncementById(announcement, { popupHome })} />
+                                                    <Switch checked={announcement.popupAfterLogin} checkedChildren="登录" unCheckedChildren="登录" onChange={(popupAfterLogin) => void updateAnnouncementById(announcement, { popupAfterLogin })} />
+                                                    <Popconfirm title="删除这条公告？" okText="删除" cancelText="取消" onConfirm={() => void deleteAnnouncementById(announcement.id)}>
+                                                        <Button danger icon={<Trash2 className="size-4" />}>
+                                                            删除
+                                                        </Button>
+                                                    </Popconfirm>
+                                                </Space>
+                                            </div>
+                                        </div>
+                                    ))}
+                                    {!announcements.length && !announcementsLoading ? <div className="rounded-md border border-dashed border-stone-200 px-3 py-8 text-center text-sm text-stone-500 dark:border-stone-800">暂无公告。</div> : null}
+                                </div>
+                            </section>
                         </div>
                     </Panel>
                 ) : null}
@@ -1713,6 +2505,7 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
                                 </div>
                                 <DatePicker.RangePicker
                                     className="admin-log-date-range w-full min-w-0 max-w-full"
+                                    classNames={{ popup: { root: "admin-date-picker-dropdown" } }}
                                     allowClear
                                     format="YYYY-MM-DD"
                                     placeholder={["开始日期", "结束日期"]}
@@ -2002,6 +2795,26 @@ export function AdminDashboard({ initialUsers, initialSettings, initialPromptCou
             </Modal>
             <Modal title="生成日志详情" open={Boolean(viewingGenerationLog)} footer={null} onCancel={() => setViewingGenerationLog(null)} width={860}>
                 {viewingGenerationLog ? <GenerationLogDetail log={viewingGenerationLog} settings={settings.generationAssetStorage} /> : null}
+            </Modal>
+            <WebdavSyncModal open={webdavSyncOpen} syncing={webdavSyncing} progress={webdavSyncProgress} summary={webdavSyncSummary} onClose={() => setWebdavSyncOpen(false)} onSync={() => void startWebdavSync()} />
+            <Modal title="CDK 明细" open={Boolean(viewingCdkCode)} footer={null} onCancel={() => setViewingCdkCode(null)} width={760}>
+                {viewingCdkCode ? (
+                    <div className="space-y-3">
+                        <div className="rounded-lg border border-stone-200 bg-stone-50/80 p-3 dark:border-stone-800 dark:bg-stone-900/60">
+                            <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                                <div className="text-sm font-semibold text-stone-950 dark:text-stone-100">兑换码</div>
+                                <Button size="small" icon={<Copy className="size-3.5" />} disabled={!viewingCdkCode.code} onClick={() => void copyCdkPlainCode(viewingCdkCode)}>
+                                    复制明文
+                                </Button>
+                            </div>
+                            <div className="break-all rounded-md border border-stone-200 bg-white px-3 py-2 font-mono text-sm font-semibold text-stone-950 dark:border-stone-800 dark:bg-stone-950 dark:text-stone-100">
+                                {viewingCdkCode.code || "CDK 明文不可用"}
+                            </div>
+                            {!viewingCdkCode.code ? <div className="mt-2 text-xs text-stone-500 dark:text-stone-400">这个 CDK 没有可复制的明文。</div> : null}
+                        </div>
+                        <CdkRedemptionDetail code={viewingCdkCode} />
+                    </div>
+                ) : null}
             </Modal>
             <input
                 ref={logoInputRef}
@@ -2342,6 +3155,20 @@ function GenerationConcurrencyPanel({ settings, onChange }: { settings: AuthSett
     );
 }
 
+function GenerationDefaultsPanel({ settings, onChange }: { settings: AuthSettings; onChange: (key: keyof AuthSettings["generationDefaults"], value: number | null) => void }) {
+    return (
+        <div className="rounded-lg border border-stone-200 bg-stone-50/70 p-4 dark:border-stone-800 dark:bg-stone-900/40">
+            <SectionTitle icon={<SlidersHorizontal className="size-4" />} title="生成默认值" />
+            <div className="mt-4 max-w-xs">
+                <LabeledControl label="画布默认生图张数">
+                    <InputNumber className="w-full" min={1} max={10} precision={0} value={settings.generationDefaults.canvasImageCount} onChange={(value) => onChange("canvasImageCount", value)} />
+                </LabeledControl>
+            </div>
+            <div className="mt-2 text-xs leading-5 text-stone-500 dark:text-stone-400">新建画布生图节点和配置节点默认使用，单个节点仍可单独覆盖。</div>
+        </div>
+    );
+}
+
 function GenerationAssetStoragePanel({ settings, onChange }: { settings: AuthSettings; onChange: (key: keyof AuthSettings["generationAssetStorage"], value: boolean) => void }) {
     return (
         <div className="rounded-lg border border-stone-200 bg-stone-50/70 p-4 dark:border-stone-800 dark:bg-stone-900/40">
@@ -2385,6 +3212,116 @@ function GenerationAssetStoragePanel({ settings, onChange }: { settings: AuthSet
     );
 }
 
+function WebdavSettingsPanel({
+    settings,
+    testing,
+    syncing,
+    onChange,
+    onTest,
+    onOpenSync,
+}: {
+    settings: AuthSettings;
+    testing: boolean;
+    syncing: boolean;
+    onChange: <K extends keyof AuthSettings["webdav"]>(key: K, value: AuthSettings["webdav"][K]) => void;
+    onTest: () => void;
+    onOpenSync: () => void;
+}) {
+    const webdavReady = settings.webdav.enabled && Boolean(settings.webdav.url.trim());
+    return (
+        <div className="rounded-lg border border-stone-200 bg-stone-50/70 p-4 dark:border-stone-800 dark:bg-stone-900/40">
+            <div className="flex items-start justify-between gap-3">
+                <SectionTitle icon={<Database className="size-4" />} title="WebDAV 同步" />
+                <Switch checked={settings.webdav.enabled} checkedChildren="开启" unCheckedChildren="关闭" onChange={(checked) => onChange("enabled", checked)} />
+            </div>
+            <div className="mt-4 grid gap-3">
+                <div className="rounded-md border border-stone-200 bg-white p-3 dark:border-stone-800 dark:bg-stone-950/70">
+                    <div className="text-xs font-semibold text-stone-500 dark:text-stone-400">连接方式</div>
+                    <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="inline-flex w-fit items-center rounded-md bg-stone-900 px-3 py-1.5 text-sm font-semibold text-white dark:bg-white dark:text-stone-950">后台代理</div>
+                        <div className="text-xs leading-5 text-stone-500 dark:text-stone-400">真实 WebDAV 地址、账号和密码只保存在后台，用户端只访问系统代理，不暴露上游信息。</div>
+                    </div>
+                </div>
+                <div className="rounded-md border border-sky-200/70 bg-sky-50 px-3 py-2 text-xs leading-5 text-sky-900 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-100">
+                    开启后，用户登录时会在浏览器空闲时自动同步本地画布、素材、工作台记录和媒体缓存，同一账号同一浏览器 6 小时内最多自动同步一次。后台按钮只同步当前浏览器的数据；服务器没有办法直接读取其他用户浏览器里的本地缓存。
+                </div>
+                <div className="rounded-md border border-amber-200/80 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-100">
+                    WebDAV 不会替代生成结果服务器副本。图片/视频是否下载到服务器，仍由上方“生成结果服务器兜底”的下载开关控制；用户端展示顺序仍是本地缓存、远程结果地址、服务器副本。
+                </div>
+                <LabeledControl label="WebDAV 地址">
+                    <Input value={settings.webdav.url} placeholder="https://nas.example.com/webdav" onChange={(event) => onChange("url", event.target.value)} />
+                </LabeledControl>
+                <div className="grid gap-3 sm:grid-cols-2">
+                    <LabeledControl label="远程目录">
+                        <Input value={settings.webdav.directory} placeholder="vozeb" onChange={(event) => onChange("directory", event.target.value)} />
+                    </LabeledControl>
+                    <LabeledControl label="账号">
+                        <Input value={settings.webdav.username} autoComplete="username" onChange={(event) => onChange("username", event.target.value)} />
+                    </LabeledControl>
+                </div>
+                <LabeledControl label="密码 / 应用密码">
+                    <Input.Password value={settings.webdav.password} autoComplete="current-password" onChange={(event) => onChange("password", event.target.value)} />
+                </LabeledControl>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="text-xs leading-5 text-stone-500 dark:text-stone-400">WebDAV 由后台保存和代理，用户端不会看到真实地址、账号或密码。</div>
+                    <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+                        <Button className="shrink-0" loading={testing} disabled={!webdavReady} icon={<PlugZap className="size-4" />} onClick={onTest}>
+                            测试连接
+                        </Button>
+                        <Button className="shrink-0" loading={syncing} disabled={!webdavReady} icon={<RefreshCw className={syncing ? "size-4 animate-spin" : "size-4"} />} onClick={onOpenSync}>
+                            同步当前浏览器数据
+                        </Button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function WebdavSyncModal({ open, syncing, progress, summary, onClose, onSync }: { open: boolean; syncing: boolean; progress: WebdavSyncProgressLine[]; summary: string; onClose: () => void; onSync: () => void }) {
+    return (
+        <Modal
+            title="WebDAV 数据同步"
+            open={open}
+            onCancel={onClose}
+            footer={
+                <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                    <Button onClick={onClose} disabled={syncing}>
+                        关闭
+                    </Button>
+                    <Button type="primary" icon={<RefreshCw className={syncing ? "size-4 animate-spin" : "size-4"} />} loading={syncing} onClick={onSync}>
+                        立即同步
+                    </Button>
+                </div>
+            }
+            width={560}
+            centered
+            destroyOnHidden
+        >
+            <div className="space-y-3">
+                <div className="rounded-lg border border-stone-200 bg-stone-50/80 p-3 text-sm leading-6 text-stone-600 dark:border-stone-800 dark:bg-stone-900/50 dark:text-stone-300">
+                    这里同步的是当前浏览器里的画布、我的素材、生成记录和本地媒体文件。WebDAV 通过后台代理访问，前端不会显示真实上游地址、账号或密码。
+                </div>
+                {summary ? <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm leading-6 text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-100">{summary}</div> : null}
+                <div className="max-h-56 space-y-2 overflow-y-auto rounded-lg border border-stone-200 bg-white p-3 dark:border-stone-800 dark:bg-stone-950/70">
+                    {progress.length ? (
+                        progress.map((item) => (
+                            <div key={item.id} className="flex min-w-0 items-start gap-2 text-sm leading-5">
+                                <Tag className="m-0 shrink-0" color={item.status === "exception" ? "red" : item.status === "success" ? "green" : "blue"}>
+                                    {item.status === "exception" ? "失败" : item.status === "success" ? "完成" : "同步"}
+                                </Tag>
+                                <span className="min-w-0 break-words text-stone-600 dark:text-stone-300">{item.text}</span>
+                            </div>
+                        ))
+                    ) : (
+                        <div className="py-6 text-center text-sm text-stone-500 dark:text-stone-400">点击“立即同步”开始。</div>
+                    )}
+                </div>
+            </div>
+        </Modal>
+    );
+}
+
 function QuotaRuleTable({
     settings,
     customModel,
@@ -2424,7 +3361,7 @@ function QuotaRuleTable({
             </div>
             <div className="mt-4 rounded-md border border-stone-200 bg-white p-3 dark:border-stone-800 dark:bg-stone-950/70">
                 <div className="text-sm font-semibold text-stone-950 dark:text-stone-100">模型消耗倍数</div>
-                <div className="mt-1 text-xs leading-5 text-stone-500 dark:text-stone-400">使用管理员默认接口时扣积分；自定义接口不扣平台积分。Grok 或其他未单独设置的模型会使用默认消耗。</div>
+                <div className="mt-1 text-xs leading-5 text-stone-500 dark:text-stone-400">用户生成统一使用管理员接口并扣积分；Grok 或其他未单独设置的模型会使用默认消耗。</div>
                 <div className="mt-3 max-w-xs">
                     <LabeledControl label="未单独设置模型默认消耗">
                         <InputNumber className="w-full" min={0} precision={2} value={settings.modelPointCosts[DEFAULT_MODEL_POINT_COST_KEY] ?? 1} onChange={(value) => onModelPointCostChange(DEFAULT_MODEL_POINT_COST_KEY, toNumberOrOne(value))} />
@@ -2652,7 +3589,10 @@ function ChannelHealthResultRow({ result }: { result: ChannelHealthResult }) {
             <span className="truncate">模型：{result.model}</span>
             <span>状态：{result.status || "-"}</span>
             <span>扣费：{typeof result.pointsCost === "number" ? formatCreditAmount(result.pointsCost) : "-"}</span>
-            <span className="min-w-0 flex-1 truncate">{result.remoteUrl ? "远程地址：" : result.taskId ? "任务：" : result.error ? "原因：" : ""}{detail}</span>
+            <span className="min-w-0 flex-1 truncate">
+                {result.remoteUrl ? "远程地址：" : result.taskId ? "任务：" : result.error ? "原因：" : ""}
+                {detail}
+            </span>
         </div>
     );
 }
@@ -2829,12 +3769,7 @@ function selectChannelHealthModel(channel: SystemModelChannel, defaults: AuthSet
     const defaultValue = kind === "image" ? defaults.imageModel : kind === "video" ? defaults.videoModel : defaults.textModel;
     const normalizedDefault = modelNameFromOption(defaultValue || "");
     if (normalizedDefault && (!channel.models.length || channel.models.includes(normalizedDefault))) return normalizedDefault;
-    const matcher =
-        kind === "image"
-            ? /image|img|gpt-image|dall|flux|sd|midjourney/i
-            : kind === "video"
-              ? /video|vid|i2v|t2v|seedance|kling|sora|veo|grok-imagine/i
-              : /gpt|chat|claude|deepseek|qwen|grok|text/i;
+    const matcher = kind === "image" ? /image|img|gpt-image|dall|flux|sd|midjourney/i : kind === "video" ? /video|vid|i2v|t2v|seedance|kling|sora|veo|grok-imagine/i : /gpt|chat|claude|deepseek|qwen|grok|text/i;
     return channel.models.find((model) => matcher.test(model)) || channel.models[0] || normalizedDefault;
 }
 
@@ -2847,6 +3782,86 @@ function modelNameFromOption(value: string) {
 
 function healthKindLabel(kind: ChannelHealthKind) {
     return kind === "image" ? "图片" : kind === "video" ? "视频" : "文本";
+}
+
+function isCdkExpired(code: PublicCdkCode) {
+    return Boolean(code.expiresAt && Date.parse(code.expiresAt) <= Date.now());
+}
+
+function cdkStatusLabel(code: PublicCdkCode) {
+    if (!code.code) return "明文缺失";
+    if (isCdkExpired(code)) return "已过期";
+    if (code.status !== "active") return "不可用";
+    if (code.redeemedCount >= code.maxRedemptions) return "已兑完";
+    return code.redeemedCount > 0 ? "部分兑换" : "未兑换";
+}
+
+function cdkStatusTone(code: PublicCdkCode) {
+    if (!code.code || isCdkExpired(code) || code.status !== "active") return "default";
+    if (code.redeemedCount >= code.maxRedemptions) return "green";
+    return code.redeemedCount > 0 ? "blue" : "gold";
+}
+
+function formatCreatedCdkExport(codes: CreatedCdkCode[]) {
+    const lines = [
+        "VOZEB CDK 导出",
+        `导出时间：${new Date().toLocaleString("zh-CN", { hour12: false })}`,
+        `数量：${codes.length}`,
+        "",
+        ...codes.map((code, index) =>
+            [
+                `${index + 1}. ${code.code}`,
+                `积分：${formatCreditAmount(code.points)}`,
+                `可兑换次数：${code.maxRedemptions}`,
+                `有效期：${code.expiresAt ? new Date(code.expiresAt).toLocaleString("zh-CN", { hour12: false }) : "长期有效"}`,
+                code.note ? `备注：${code.note}` : "",
+            ]
+                .filter(Boolean)
+                .join(" | "),
+        ),
+        "",
+        "说明：仅导出本次生成且可复制的明文 CDK。",
+    ];
+    return lines.join("\n");
+}
+
+function downloadTextFile(filename: string, text: string) {
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+}
+
+function CdkRedemptionDetail({ code }: { code: PublicCdkCode }) {
+    const redemptions = [...code.redemptions].sort((a, b) => Date.parse(b.redeemedAt) - Date.parse(a.redeemedAt));
+    const visibleRedemptions = redemptions.slice(0, 20);
+
+    return (
+        <div className="rounded-lg border border-stone-200 bg-stone-50/80 p-3 dark:border-stone-800 dark:bg-stone-900/60">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div className="text-sm font-semibold text-stone-950 dark:text-stone-100">兑换明细</div>
+                <div className="text-xs text-stone-500 dark:text-stone-400">
+                    共 {redemptions.length} 条{redemptions.length > visibleRedemptions.length ? "，展示最近 20 条" : ""}
+                </div>
+            </div>
+            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                {visibleRedemptions.map((item) => (
+                    <div key={`${item.userId}-${item.redeemedAt}`} className="min-w-0 rounded-md border border-stone-200 bg-white p-3 dark:border-stone-800 dark:bg-stone-950">
+                        <div className="truncate text-sm font-medium text-stone-900 dark:text-stone-100">
+                            {item.displayName}
+                            <span className="ml-1 font-normal text-stone-500 dark:text-stone-400">@{item.username}</span>
+                        </div>
+                        <div className="mt-1 text-xs text-stone-500 dark:text-stone-400">{new Date(item.redeemedAt).toLocaleString("zh-CN")}</div>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
 }
 
 function splitTags(value?: string) {
@@ -2935,6 +3950,8 @@ const adminSections: Array<{ key: AdminSectionKey; label: string; description: s
     { key: "overview", label: "概览", description: "快速查看用户、接口、模型和公共提示词状态。", shortDescription: "关键数据", icon: <Database className="size-4" /> },
     { key: "site", label: "网站设置", description: "管理前台网站标题、Logo、SEO 标题、描述和关键词。", shortDescription: "品牌与 SEO", icon: <Globe2 className="size-4" /> },
     { key: "settings", label: "系统设置", description: "管理注册策略、签到积分、通用接口和默认模型。", shortDescription: "账号与接口", icon: <SlidersHorizontal className="size-4" /> },
+    { key: "cdk", label: "CDK 管理", description: "生成和管理用户积分兑换密钥。", shortDescription: "积分兑换", icon: <Gift className="size-4" /> },
+    { key: "announcements", label: "网站公告", description: "发布公告记录，并设置首页或登录后弹窗提醒。", shortDescription: "通知弹窗", icon: <Megaphone className="size-4" /> },
     { key: "users", label: "用户管理", description: "调整用户角色、账号状态和积分余额。", shortDescription: "角色积分", icon: <UsersRound className="size-4" /> },
     { key: "logs", label: "生成日志", description: "查看用户生成的图片、视频、提示词、入口来源和调用状态。", shortDescription: "创作记录", icon: <Film className="size-4" /> },
     { key: "prompts", label: "提示词库", description: "维护会出现在用户端提示词库里的公共提示词。", shortDescription: "公共内容", icon: <KeyRound className="size-4" /> },

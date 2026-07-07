@@ -4,7 +4,7 @@ import { ArrowLeft, Database, KeyRound, MailCheck, ShieldCheck, Workflow } from 
 const policies = [
     {
         title: "账号与配置数据",
-        body: "VOZEB 默认把账号、角色、额度、签到、后台配置和公共提示词保存在服务端 `.data` 目录；画布项目和个人素材主要保存在浏览器本地，是否同步到 WebDAV 取决于用户配置。",
+        body: "VOZEB 默认把账号、角色、额度、签到、后台配置、CDK、公告和公共提示词保存在服务端 `.data` 目录；WebDAV 由管理员后台统一接入，用户端不会展示真实连接信息。",
         icon: <Database className="size-5" />,
     },
     {
@@ -14,7 +14,7 @@ const policies = [
     },
     {
         title: "AI 模型请求",
-        body: "AI 生成请求会发送到你配置的模型服务或 OpenAI 兼容接口。请在填写 API Key、Base URL、参考图片和提示词前确认对应服务商的数据处理规则。",
+        body: "AI 生成请求统一经过系统接口代理发送到管理员配置的模型服务或 OpenAI 兼容接口，用户端不会展示真实上游域名或 API Key。部署者仍需确认对应服务商的数据处理规则。",
         icon: <Workflow className="size-5" />,
     },
     {

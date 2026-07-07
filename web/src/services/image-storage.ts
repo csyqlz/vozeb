@@ -71,13 +71,22 @@ export async function setImageBlob(storageKey: string, blob: Blob) {
 export async function imageToDataUrl(image: { url?: string; dataUrl?: string; storageKey?: string }) {
     const stored = image.storageKey ? await resolveStoredImageDataUrl(image.storageKey, "") : "";
     if (stored) return stored;
-    const url = image.dataUrl || image.url || "";
-    if (!url || url.startsWith("data:")) return url;
-    try {
-        return await fetchImageAsDataUrl(url);
-    } catch {
-        return url;
+    const candidates = uniqueImageSources([image.dataUrl, image.url]);
+    let fallback = "";
+    for (const url of candidates) {
+        if (!url || url.startsWith("data:")) return url;
+        fallback ||= browserReadableMediaUrl(url);
+        try {
+            return await fetchImageAsDataUrl(url);
+        } catch {
+            // A stale blob URL should not block the remote/server fallback.
+        }
     }
+    return fallback;
+}
+
+function uniqueImageSources(values: Array<string | undefined>) {
+    return Array.from(new Set(values.map((value) => (value || "").trim()).filter(Boolean)));
 }
 
 export async function deleteStoredImages(keys: Iterable<string>) {

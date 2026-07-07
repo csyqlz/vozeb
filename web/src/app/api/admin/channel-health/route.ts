@@ -90,7 +90,32 @@ async function testImage(baseUrl: string, apiKey: string, model: string): Promis
         });
         const payload = await readPayload(response);
         if (response.ok) {
-            return { ok: true, kind: "image", model, status: response.status, remoteUrl: findStringByKeys(payload, ["url", "image_url", "imageUrl", "download_url", "file_url"]), ...pointsInfo(response.headers) };
+            return {
+                ok: true,
+                kind: "image",
+                model,
+                status: response.status,
+                remoteUrl: findStringByKeys(payload, [
+                    "url",
+                    "image_url",
+                    "imageUrl",
+                    "media_url",
+                    "mediaUrl",
+                    "source_url",
+                    "sourceUrl",
+                    "output_url",
+                    "outputUrl",
+                    "download_url",
+                    "downloadUrl",
+                    "file_url",
+                    "fileUrl",
+                    "asset_url",
+                    "assetUrl",
+                    "result_url",
+                    "resultUrl",
+                ]),
+                ...pointsInfo(response.headers),
+            };
         }
         const message = errorMessage(payload, `图片测试失败，状态码 ${response.status}`);
         if (responseFormat === "url" && /response[_ -]?format|url|unsupported|not supported|invalid|not implemented/i.test(message)) continue;
@@ -137,7 +162,31 @@ async function testVideoPayloads(baseUrl: string, apiKey: string, model: string,
                     status: response.status,
                     ...pointsInfo(response.headers),
                     taskId: findStringByKeys(data, ["task_id", "taskId", "id", "job_id", "jobId"]),
-                    remoteUrl: findStringByKeys(data, ["video_url", "videoUrl", "url", "download_url", "file_url"]),
+                    remoteUrl: findStringByKeys(data, [
+                        "video_url",
+                        "videoUrl",
+                        "media_url",
+                        "mediaUrl",
+                        "play_url",
+                        "playUrl",
+                        "stream_url",
+                        "streamUrl",
+                        "source_url",
+                        "sourceUrl",
+                        "content_url",
+                        "contentUrl",
+                        "url",
+                        "output_url",
+                        "outputUrl",
+                        "download_url",
+                        "downloadUrl",
+                        "file_url",
+                        "fileUrl",
+                        "asset_url",
+                        "assetUrl",
+                        "result_url",
+                        "resultUrl",
+                    ]),
                 };
             }
             const message = errorMessage(data, `视频测试失败，状态码 ${response.status}`);

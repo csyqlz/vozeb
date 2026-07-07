@@ -1,61 +1,88 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { App } from "antd";
 
-import { createModelChannel, normalizeGenerationConcurrency, normalizeGenerationPointMultipliers, useConfigStore, type GenerationConcurrencySettings, type GenerationPointMultipliers } from "@/stores/use-config-store";
+import { SiteAnnouncementPopup } from "@/components/layout/site-announcement-popup";
+import { appStorageKey } from "@/lib/storage-keys";
+import { applyPublicSystemSettings, useConfigStore, type PublicSystemSettings } from "@/stores/use-config-store";
+import { type LocalUser, useUserStore } from "@/stores/use-user-store";
+
+const AUTO_WEBDAV_SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 export function ClientRootInit({ children }: { children: ReactNode }) {
     const { message } = App.useApp();
-    const handledConfigParams = useRef(false);
-    const updateConfig = useConfigStore((state) => state.updateConfig);
-    const config = useConfigStore((state) => state.config);
-    const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
+    const setConfig = useConfigStore((state) => state.setConfig);
+    const setUser = useUserStore((state) => state.setUser);
 
     useEffect(() => {
+        let cancelled = false;
+        let cancelAutoSync: (() => void) | undefined;
         void fetch("/api/auth/session", { cache: "no-store" })
-            .then((response) => response.json() as Promise<{ settings?: { modelPointCosts?: Record<string, number>; generationPointMultipliers?: GenerationPointMultipliers; generationConcurrency?: GenerationConcurrencySettings } }>)
+            .then((response) => response.json() as Promise<{ user?: LocalUser | null; settings?: PublicSystemSettings }>)
             .then((payload) => {
-                updateConfig("modelPointCosts", payload.settings?.modelPointCosts || {});
-                if (payload.settings?.generationPointMultipliers) updateConfig("generationPointMultipliers", normalizeGenerationPointMultipliers(payload.settings.generationPointMultipliers));
-                if (payload.settings?.generationConcurrency) updateConfig("generationConcurrency", normalizeGenerationConcurrency(payload.settings.generationConcurrency));
+                if (cancelled) return;
+                setUser(payload.user || null);
+                setConfig(applyPublicSystemSettings(useConfigStore.getState().config, payload.settings));
+                if (payload.user && payload.settings?.webdav?.enabled) cancelAutoSync = scheduleSystemWebdavAutoSync(payload.user.id);
             })
             .catch(() => undefined);
-    }, [updateConfig]);
+        return () => {
+            cancelled = true;
+            cancelAutoSync?.();
+        };
+    }, [setConfig, setUser]);
 
     useEffect(() => {
-        if (handledConfigParams.current) return;
-        const searchParams = new URLSearchParams(window.location.search);
-        const baseUrl = searchParams.get("baseUrl") || searchParams.get("baseurl");
-        const apiKey = searchParams.get("apiKey") || searchParams.get("apikey");
-        if (!baseUrl && !apiKey) return;
-        handledConfigParams.current = true;
-        searchParams.delete("baseUrl");
-        searchParams.delete("baseurl");
-        searchParams.delete("apiKey");
-        searchParams.delete("apikey");
-        window.history.replaceState(null, "", `${window.location.pathname}${searchParams.size ? `?${searchParams}` : ""}${window.location.hash}`);
-        const firstChannel = config.channels[0];
-        updateConfig(
-            "channels",
-            firstChannel
-                ? config.channels.map((channel, index) =>
-                      index === 0
-                          ? {
-                                ...channel,
-                                ...(baseUrl ? { baseUrl } : {}),
-                                ...(apiKey ? { apiKey } : {}),
-                            }
-                          : channel,
-                  )
-                : [createModelChannel({ id: "default", name: "默认渠道", baseUrl: baseUrl || undefined, apiKey: apiKey || "" })],
-        );
-        if (baseUrl) updateConfig("baseUrl", baseUrl);
-        if (apiKey) updateConfig("apiKey", apiKey);
-        openConfigDialog(false);
-        message.success("已导入本地直连配置");
-    }, [config.channels, message, openConfigDialog, updateConfig]);
+        const handleMissingConfig = () => {
+            message.warning("请联系管理员在后台配置可用模型渠道");
+        };
+        window.addEventListener("vozeb-system-config-missing", handleMissingConfig);
+        return () => window.removeEventListener("vozeb-system-config-missing", handleMissingConfig);
+    }, [message]);
 
-    return <>{children}</>;
+    return (
+        <>
+            {children}
+            <SiteAnnouncementPopup />
+        </>
+    );
+}
+
+function scheduleSystemWebdavAutoSync(userId: string) {
+    const storageKey = `${appStorageKey("webdav_auto_sync_at")}:${userId}`;
+    try {
+        const lastSyncedAt = Number(window.localStorage.getItem(storageKey) || "0");
+        if (Number.isFinite(lastSyncedAt) && Date.now() - lastSyncedAt < AUTO_WEBDAV_SYNC_INTERVAL_MS) return;
+        window.localStorage.setItem(storageKey, String(Date.now()));
+    } catch {
+        return;
+    }
+
+    return runOnIdle(() => {
+        void import("@/services/app-sync")
+            .then(({ syncAppDataToWebdav }) =>
+                syncAppDataToWebdav({
+                    proxyMode: "nextjs",
+                    url: "/api/webdav",
+                    username: "",
+                    password: "",
+                    directory: "",
+                    lastSyncedAt: "",
+                }),
+            )
+            .catch(() => undefined);
+    });
+}
+
+function runOnIdle(task: () => void) {
+    const idleWindow = window as Window & {
+        requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
+        cancelIdleCallback?: (handle: number) => void;
+    };
+    const idleId = idleWindow.requestIdleCallback?.(task, { timeout: 3000 });
+    if (idleId !== undefined) return () => idleWindow.cancelIdleCallback?.(idleId);
+    const timer = window.setTimeout(task, 1500);
+    return () => window.clearTimeout(timer);
 }

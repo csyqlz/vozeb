@@ -94,13 +94,16 @@ export function serializePublicSettings(settings: AuthSettings) {
         site: settings.site,
         registrationEnabled: settings.registrationEnabled,
         emailRegistrationEnabled: settings.emailRegistrationEnabled,
-        allowUserApiConfig: settings.allowUserApiConfig,
         defaultPoints: settings.defaultPoints,
         checkInRewardPoints: settings.checkInRewardPoints,
         modelPointCosts: settings.modelPointCosts,
         generationPointMultipliers: settings.generationPointMultipliers,
         generationConcurrency: settings.generationConcurrency,
+        generationDefaults: settings.generationDefaults,
         generationAssetStorage: settings.generationAssetStorage,
+        webdav: {
+            enabled: settings.webdav.enabled && Boolean(settings.webdav.url.trim()),
+        },
         defaultModels: settings.defaultModels,
         systemChannels: settings.systemChannels
             .filter((channel) => channel.enabled)

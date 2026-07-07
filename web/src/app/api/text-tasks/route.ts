@@ -147,15 +147,21 @@ function publicTask(task: TextTask) {
 
 function sanitizeConfig(config?: TextTaskConfig): TextTaskConfig | null {
     if (!config?.baseUrl?.trim() || !config?.model?.trim()) return null;
-    if (config.apiSource !== "system" && !config.apiKey?.trim()) return null;
+    if (config.apiSource !== "system" || !config.baseUrl.trim().startsWith("/api/ai/system/")) return null;
     return {
-        apiSource: config.apiSource === "system" ? "system" : "custom",
+        apiSource: "system",
         baseUrl: config.baseUrl.trim(),
-        apiKey: config.apiKey || "",
+        apiKey: "system",
         apiFormat: config.apiFormat === "gemini" ? "gemini" : "openai",
-        model: config.model.trim(),
-        systemPrompt: config.systemPrompt || "",
+        model: rawModelName(config.model),
+        systemPrompt: "",
     };
+}
+
+function rawModelName(value: string) {
+    const model = value.trim();
+    const separator = model.indexOf("::");
+    return separator >= 0 ? model.slice(separator + 2).trim() : model;
 }
 
 function sanitizeMessages(messages?: AiTextMessage[]) {
@@ -307,9 +313,18 @@ function normalizeApiBaseUrl(baseUrl: string, apiFormat: "openai" | "gemini", or
     const absoluteBase = baseUrl.startsWith("/") ? `${origin}${baseUrl}` : baseUrl;
     const normalized = absoluteBase.trim().replace(/\/+$/, "");
     const lower = normalized.toLowerCase();
+    if (isInternalSystemProxyBase(normalized)) return normalized;
     if (lower.endsWith("/v1") || lower.endsWith("/v1beta") || lower.endsWith("/api/v3") || lower.endsWith("/api/plan/v3")) return normalized;
     if (apiFormat === "gemini") return `${normalized}/v1beta`;
     return `${normalized}/v1`;
+}
+
+function isInternalSystemProxyBase(value: string) {
+    try {
+        return /^\/api\/ai\/system\/[^/]+$/i.test(new URL(value).pathname);
+    } catch {
+        return false;
+    }
 }
 
 function taskHeaders(config: TextTaskConfig, cookie: string) {

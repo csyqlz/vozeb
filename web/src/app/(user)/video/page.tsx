@@ -24,6 +24,7 @@ import { createVideoGenerationTask, pollVideoGenerationTask, storeGeneratedVideo
 import { useAssetStore } from "@/stores/use-asset-store";
 import { modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
+import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 
@@ -49,6 +50,7 @@ type GenerationResult = {
 
 type GenerationLog = {
     id: string;
+    ownerUserId?: string;
     createdAt: number;
     title: string;
     prompt: string;
@@ -73,7 +75,7 @@ type GenerationLogConfig = Pick<AiConfig, "model" | "videoModel" | "size" | "vqu
 
 type UpdateAiConfig = <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
 
-const logStore = localforage.createInstance({ name: APP_STORAGE_NAME, storeName: "video_generation_logs" });
+const globalLogStore = localforage.createInstance({ name: APP_STORAGE_NAME, storeName: "video_generation_logs" });
 const legacyLogStore = localforage.createInstance({ name: LEGACY_APP_STORAGE_NAME, storeName: "video_generation_logs" });
 const loadPromptSelectDialog = () => import("@/components/prompts/prompt-select-dialog").then((module) => module.PromptSelectDialog);
 const loadAssetPickerModal = () => import("@/app/(user)/canvas/components/asset-picker-modal").then((module) => module.AssetPickerModal);
@@ -97,6 +99,7 @@ export default function VideoPage() {
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const addAsset = useAssetStore((state) => state.addAsset);
+    const userId = useUserStore((state) => state.user?.id || "");
     const [prompt, setPrompt] = useState("");
     const [references, setReferences] = useState<ReferenceImage[]>([]);
     const [videoReferences, setVideoReferences] = useState<ReferenceVideo[]>([]);
@@ -112,6 +115,7 @@ export default function VideoPage() {
     const [selectedResultIds, setSelectedResultIds] = useState<string[]>([]);
     const [previewLog, setPreviewLog] = useState<GenerationLog | null>(null);
     const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+    const userIdRef = useRef("");
 
     const model = effectiveConfig.videoModel || effectiveConfig.model;
     const pointsCost = requestCreditCost({
@@ -128,8 +132,23 @@ export default function VideoPage() {
     const previewPendingCount = results.filter((result) => result.status === "pending").length;
 
     useEffect(() => {
-        void refreshLogs();
-    }, []);
+        userIdRef.current = userId;
+        activeLogIdsRef.current.clear();
+        queuedVideoLogsRef.current = [];
+        queuedVideoLogIdsRef.current.clear();
+        deletedResultLogIdsRef.current.clear();
+        activeLogIdRef.current = null;
+        setPreviewLog(null);
+        setResults([]);
+        setSelectedLogIds([]);
+        setSelectedResultIds([]);
+        syncActiveVideoCount();
+        if (userId) void refreshLogs(userId);
+        else {
+            logsRef.current = [];
+            setLogs([]);
+        }
+    }, [userId]);
 
     useEffect(() => {
         return preloadOnIdle(() => {
@@ -304,7 +323,7 @@ export default function VideoPage() {
             return null;
         }
         if (!isAiConfigReady(effectiveConfig, model)) {
-            message.warning("请先完成配置");
+            message.warning("请联系管理员在后台配置可用视频模型");
             openConfigDialog(true);
             return null;
         }
@@ -441,7 +460,7 @@ export default function VideoPage() {
         }
         setSelectedLogIds([]);
         setDeleteConfirmOpen(false);
-        const results = await Promise.allSettled([deleteStoredMedia(mediaKeys), deleteServerGenerationLogs(deleteIds.map((id) => `video-workbench:${id}`)), ...deleteIds.flatMap((id) => [logStore.removeItem(id), legacyLogStore.removeItem(id)])]);
+        const results = await Promise.allSettled([deleteStoredMedia(mediaKeys), deleteServerGenerationLogs(deleteIds.map((id) => `video-workbench:${id}`)), ...deleteIds.flatMap((id) => [globalLogStore.removeItem(id), legacyLogStore.removeItem(id)])]);
         const failed = results.filter((result) => result.status === "rejected");
         if (failed.length) {
             message.warning("记录已从本地列表移除，部分远程或本地缓存删除失败，请稍后刷新重试");
@@ -452,16 +471,17 @@ export default function VideoPage() {
     };
 
     const saveLog = async (log: GenerationLog, options?: { refresh?: boolean }) => {
-        const nextLogs = [log, ...logsRef.current.filter((item) => item.id !== log.id)].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        const ownedLog = withLogOwner(log, userIdRef.current);
+        const nextLogs = [ownedLog, ...logsRef.current.filter((item) => item.id !== ownedLog.id)].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
         logsRef.current = nextLogs;
         setLogs(nextLogs);
-        if (activeLogIdRef.current === log.id) setPreviewLog(log);
-        await logStore.setItem(log.id, serializeLog(log));
+        if (activeLogIdRef.current === ownedLog.id) setPreviewLog(ownedLog);
+        await globalLogStore.setItem(ownedLog.id, serializeLog(ownedLog));
         if (options?.refresh !== false) await refreshLogs();
     };
 
-    const refreshLogs = async () => {
-        const nextLogs = await readStoredLogs();
+    const refreshLogs = async (ownerUserId = userIdRef.current) => {
+        const nextLogs = ownerUserId ? await readStoredLogs(ownerUserId) : [];
         const visibleLogs = nextLogs.filter((log) => !deletedResultLogIdsRef.current.has(log.id));
         logsRef.current = visibleLogs;
         setLogs(visibleLogs);
@@ -1154,30 +1174,35 @@ function LogCard({ log, selected, active, onSelectedChange, onClick, onRename }:
     );
 }
 
-async function readStoredLogs() {
+async function readStoredLogs(userId: string) {
     if (typeof window === "undefined") return [];
     try {
         const logs: GenerationLog[] = [];
-        await logStore.iterate<GenerationLog, void>((value) => {
+        const orphanKeys: string[] = [];
+        await globalLogStore.iterate<GenerationLog, void>((value, key) => {
+            if (!value?.ownerUserId) {
+                orphanKeys.push(key);
+                return;
+            }
             logs.push(value);
         });
-        if (!logs.length) {
-            await legacyLogStore.iterate<GenerationLog, void>((value, key) => {
-                logs.push(value);
-                void logStore.setItem(key, value);
-            });
-        }
-        const [localLogs, remoteLogs] = await Promise.all([Promise.all(logs.map(normalizeLog)), readServerVideoLogs()]);
-        localLogs.filter((log) => log.status !== "生成中").forEach((log) => void recordVideoGenerationLog(log));
+        await Promise.all(orphanKeys.map((key) => globalLogStore.removeItem(key).catch(() => undefined)));
+        const ownedLogs = logs.filter((log) => log.ownerUserId === userId);
+        const [localLogs, remoteLogs] = await Promise.all([Promise.all(ownedLogs.map(normalizeLog)), readServerVideoLogs()]);
+        const ownedRemoteLogs = remoteLogs.map((log) => withLogOwner(log, userId));
         const merged = new Map<string, GenerationLog>();
-        remoteLogs.forEach((log) => merged.set(log.id, log));
+        ownedRemoteLogs.forEach((log) => merged.set(log.id, log));
         localLogs.forEach((log) => merged.set(log.id, log));
         const nextLogs = Array.from(merged.values()).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-        await Promise.all(nextLogs.filter((log) => !logs.some((item) => item.id === log.id)).map((log) => logStore.setItem(log.id, serializeLog(log)).catch(() => undefined)));
+        await Promise.all(nextLogs.filter((log) => !ownedLogs.some((item) => item.id === log.id)).map((log) => globalLogStore.setItem(log.id, serializeLog(log)).catch(() => undefined)));
         return nextLogs;
     } catch {
         return [];
     }
+}
+
+function withLogOwner(log: GenerationLog, userId: string): GenerationLog {
+    return userId ? { ...log, ownerUserId: userId } : log;
 }
 
 async function readServerVideoLogs() {
@@ -1193,20 +1218,21 @@ async function serverVideoLogToWorkbenchLog(record: StoredGenerationLogRecord): 
     const createdAt = Date.parse(record.createdAt) || Date.now();
     const asset = record.assets[0];
     const url = asset ? browserReadableMediaUrl(asset.remoteUrl || asset.serverUrl || asset.url || "") : "";
-    const video: GeneratedVideo | undefined = asset && url
-        ? {
-              id: serverVideoLogId(record),
-              url,
-              remoteUrl: asset.remoteUrl,
-              serverUrl: asset.serverUrl,
-              storageKey: "",
-              durationMs: record.durationMs || 0,
-              width: asset.width || 0,
-              height: asset.height || 0,
-              bytes: asset.bytes || 0,
-              mimeType: asset.mimeType || "video/mp4",
-          }
-        : undefined;
+    const video: GeneratedVideo | undefined =
+        asset && url
+            ? {
+                  id: serverVideoLogId(record),
+                  url,
+                  remoteUrl: asset.remoteUrl,
+                  serverUrl: asset.serverUrl,
+                  storageKey: "",
+                  durationMs: record.durationMs || 0,
+                  width: asset.width || 0,
+                  height: asset.height || 0,
+                  bytes: asset.bytes || 0,
+                  mimeType: asset.mimeType || "video/mp4",
+              }
+            : undefined;
     return normalizeLog({
         id: serverVideoLogId(record),
         createdAt,
@@ -1295,6 +1321,7 @@ async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog>
     const config = normalizeLogConfig(log);
     return {
         id: log.id || nanoid(),
+        ownerUserId: log.ownerUserId,
         createdAt: log.createdAt || Date.now(),
         title: log.title || log.model || "未命名",
         prompt: log.prompt || "",

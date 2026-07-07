@@ -159,13 +159,25 @@ function generationLabel(type: NodeGenerationInput["type"], index: number) {
 
 function readReferenceImage(node: CanvasNodeData): ReferenceImage | null {
     if (node.type !== CanvasNodeType.Image || !node.metadata?.content) return null;
+    const content = node.metadata.content;
+    const remoteUrl = isRemoteGeneratedUrl(node.metadata.remoteUrl || "") ? node.metadata.remoteUrl || "" : isRemoteGeneratedUrl(content) ? content : "";
+    const serverUrl = isServerGeneratedUrl(node.metadata.serverUrl || "") ? node.metadata.serverUrl || "" : isServerGeneratedUrl(content) ? content : "";
     return {
         id: node.id,
         name: `${node.title || node.id}.png`,
         type: node.metadata.mimeType || "image/png",
-        dataUrl: node.metadata.content,
+        dataUrl: content,
         storageKey: node.metadata.storageKey,
+        url: remoteUrl || serverUrl || undefined,
     };
+}
+
+function isRemoteGeneratedUrl(value: string) {
+    return /^https?:\/\//i.test(value);
+}
+
+function isServerGeneratedUrl(value: string) {
+    return value.startsWith("/api/generation-log-assets/");
 }
 
 function readReferenceVideo(node: CanvasNodeData): ReferenceVideo | null {

@@ -53,7 +53,9 @@ export function readImageMeta(dataUrl: string) {
 export function dataUrlToFile(image: ReferenceImage) {
     const [header, content] = image.dataUrl.split(",", 2);
     const mimeType = header.match(/data:(.*?);base64/)?.[1] || image.type || "image/png";
+    if (!content || !header.startsWith("data:")) throw new Error("参考图不是有效 base64 图片");
     const binary = atob(content || "");
+    if (!binary.length) throw new Error("参考图读取失败");
     const bytes = new Uint8Array(binary.length);
     for (let index = 0; index < binary.length; index += 1) {
         bytes[index] = binary.charCodeAt(index);

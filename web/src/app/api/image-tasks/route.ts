@@ -78,9 +78,32 @@ const IMAGE_TASK_POLL_ATTEMPTS = 120;
 const MAX_INLINE_IMAGE_BYTES = 20 * 1024 * 1024;
 const INLINE_IMAGE_TIMEOUT_MS = 30 * 1000;
 const IMAGE_RESPONSE_FORMATS = ["b64_json", "url"] as const;
-const IMAGE_URL_KEYS = ["url", "uri", "src", "image", "image_url", "imageUrl", "output_url", "outputUrl", "download_url", "downloadUrl", "file_url", "fileUrl", "asset_url", "assetUrl", "result_url", "resultUrl"];
+const IMAGE_URL_KEYS = [
+    "url",
+    "uri",
+    "src",
+    "image",
+    "image_url",
+    "imageUrl",
+    "media_url",
+    "mediaUrl",
+    "source_url",
+    "sourceUrl",
+    "content_url",
+    "contentUrl",
+    "output_url",
+    "outputUrl",
+    "download_url",
+    "downloadUrl",
+    "file_url",
+    "fileUrl",
+    "asset_url",
+    "assetUrl",
+    "result_url",
+    "resultUrl",
+];
 const IMAGE_BASE64_KEYS = ["b64_json", "b64", "base64", "image_base64", "imageBase64", "base64_json"];
-const IMAGE_CONTAINER_KEYS = ["data", "result", "results", "content", "output", "images", "image", "file", "files", "artifact", "artifacts", "items", "task", "job"];
+const IMAGE_CONTAINER_KEYS = ["data", "result", "results", "response", "payload", "content", "output", "outputs", "images", "image", "asset", "assets", "file", "files", "artifact", "artifacts", "items", "task", "job"];
 const IMAGE_TASK_ID_KEYS = ["task_id", "taskId", "id", "job_id", "jobId", "request_id", "requestId", "generation_id", "generationId"];
 const IMAGE_STATUS_KEYS = ["status", "state", "task_status", "taskStatus"];
 const IMAGE_POLL_URL_KEYS = ["poll_url", "pollUrl", "polling_url", "pollingUrl", "status_url", "statusUrl", "task_url", "taskUrl"];
@@ -108,8 +131,8 @@ export async function POST(request: Request) {
         title: typeof body.title === "string" ? body.title : "",
         config,
         prompt,
-        references: Array.isArray(body.references) ? body.references.filter((item) => Boolean(item?.dataUrl)) : [],
-        mask: body.mask?.dataUrl ? body.mask : undefined,
+        references: Array.isArray(body.references) ? body.references.filter((item) => Boolean(item?.dataUrl || item?.url)) : [],
+        mask: body.mask?.dataUrl || body.mask?.url ? body.mask : undefined,
     });
     const cookie = request.headers.get("cookie") || "";
     const origin = resolveInternalOrigin(new URL(request.url).origin);
@@ -186,20 +209,16 @@ async function runOpenAiImageTask(task: ImageTask, origin: string, cookie: strin
     let response: Response;
 
     if (task.kind === "edit") {
-        const formData = new FormData();
-        formData.set("model", config.model);
-        formData.set("prompt", withSystemPrompt(config, task.prompt));
-        formData.set("n", "1");
-        formData.set("response_format", "url");
-        formData.set("output_format", IMAGE_OUTPUT_FORMAT);
-        if (quality) formData.set("quality", quality);
-        if (requestSize) formData.set("size", requestSize);
-        task.references.forEach((reference, index) => formData.append("image", dataUrlToFile(reference.dataUrl, reference.name || `reference-${index + 1}.png`, reference.type)));
-        if (task.mask) formData.set("mask", dataUrlToFile(task.mask.dataUrl, task.mask.name || "mask.png", task.mask.type));
+        let formData: FormData;
+        try {
+            formData = await buildImageEditFormData(task, quality, requestSize, origin, cookie, "url");
+        } catch {
+            return runOpenAiJsonImageEditTask(task, url, origin, quality, requestSize, cookie, "url");
+        }
         response = await taskFetch(config, url, { method: "POST", headers, body: formData, cache: "no-store" });
         if (!response.ok) {
             const message = await readFetchError(response, "图片生成失败");
-            if (shouldFallbackToJsonImageEdit(response.status, message)) return runOpenAiJsonImageEditTask(task, url, quality, requestSize, cookie, "url");
+            if (shouldFallbackToJsonImageEdit(response.status, message)) return runOpenAiJsonImageEditTask(task, url, origin, quality, requestSize, cookie, "url");
             if (shouldTryNextImageResponseFormat("url", response.status, message)) return runOpenAiImageTaskWithBase64Response(task, origin, cookie);
             if (shouldFallbackToResponsesImage(response.status, message)) return runOpenAiResponsesImageTask(task, origin, cookie);
             throw new Error(message);
@@ -234,32 +253,33 @@ async function runOpenAiImageTask(task: ImageTask, origin: string, cookie: strin
     return { ...(await parseImagePayloadOrPoll(config, payload, resultBaseUrl, cookie, url)), pointsRemaining: readPointsRemaining(response.headers) };
 }
 
-async function runOpenAiJsonImageEditTask(task: ImageTask, url: string, quality: string | undefined, requestSize: string | undefined, cookie: string, responseFormat: (typeof IMAGE_RESPONSE_FORMATS)[number] = "b64_json") {
+async function runOpenAiJsonImageEditTask(task: ImageTask, url: string, origin: string, quality: string | undefined, requestSize: string | undefined, cookie: string, responseFormat: (typeof IMAGE_RESPONSE_FORMATS)[number] = "b64_json") {
     const config = task.config;
     const headers = taskHeaders(config, cookie);
     headers.set("content-type", "application/json");
-    const images = task.references.map((reference) => reference.dataUrl).filter(Boolean);
-    const response = await taskFetch(config, url, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-            model: config.model,
-            prompt: withSystemPrompt(config, task.prompt),
-            n: 1,
-            ...(quality ? { quality } : {}),
-            ...(requestSize ? { size: requestSize } : {}),
-            response_format: responseFormat,
-            output_format: IMAGE_OUTPUT_FORMAT,
-            ...(images.length === 1 ? { image: images[0] } : {}),
-            ...(images.length ? { images } : {}),
-            ...(task.mask?.dataUrl ? { mask: task.mask.dataUrl } : {}),
-        }),
-        cache: "no-store",
-    });
-    if (!response.ok) throw new Error(await readFetchError(response, "图片生成失败"));
-    const payload = (await response.json()) as ImageApiResponse;
-    const resultBaseUrl = response.headers.get("x-vozeb-upstream-url") || url;
-    return { ...(await parseImagePayloadOrPoll(config, payload, resultBaseUrl, cookie, url)), pointsRemaining: readPointsRemaining(response.headers) };
+    let lastMessage = "";
+    for (const body of buildJsonImageEditBodies(task, quality, requestSize, responseFormat, origin)) {
+        const response = await taskFetch(config, url, { method: "POST", headers, body: JSON.stringify(body), cache: "no-store" });
+        if (!response.ok) {
+            const message = await readFetchError(response, "图片生成失败");
+            lastMessage = message;
+            if (shouldRetryJsonImageEditPayload(response.status, message)) continue;
+            if (shouldTryNextImageResponseFormat(responseFormat, response.status, message)) {
+                if (responseFormat === "url") return runOpenAiJsonImageEditTask(task, url, origin, quality, requestSize, cookie, "b64_json");
+                return runOpenAiResponsesImageTask(task, origin, cookie);
+            }
+            if (shouldFallbackToResponsesImage(response.status, message)) return runOpenAiResponsesImageTask(task, origin, cookie);
+            throw new Error(message);
+        }
+        const payload = (await response.json()) as ImageApiResponse;
+        const resultBaseUrl = response.headers.get("x-vozeb-upstream-url") || url;
+        return { ...(await parseImagePayloadOrPoll(config, payload, resultBaseUrl, cookie, url)), pointsRemaining: readPointsRemaining(response.headers) };
+    }
+    if (shouldTryNextImageResponseFormat(responseFormat, 400, lastMessage)) {
+        if (responseFormat === "url") return runOpenAiJsonImageEditTask(task, url, origin, quality, requestSize, cookie, "b64_json");
+        return runOpenAiResponsesImageTask(task, origin, cookie);
+    }
+    throw new Error(lastMessage || "图片生成失败");
 }
 
 async function runOpenAiImageTaskWithBase64Response(task: ImageTask, origin: string, cookie: string) {
@@ -271,20 +291,16 @@ async function runOpenAiImageTaskWithBase64Response(task: ImageTask, origin: str
     const headers = taskHeaders(config, cookie);
 
     if (task.kind === "edit") {
-        const formData = new FormData();
-        formData.set("model", config.model);
-        formData.set("prompt", withSystemPrompt(config, task.prompt));
-        formData.set("n", "1");
-        formData.set("response_format", "b64_json");
-        formData.set("output_format", IMAGE_OUTPUT_FORMAT);
-        if (quality) formData.set("quality", quality);
-        if (requestSize) formData.set("size", requestSize);
-        task.references.forEach((reference, index) => formData.append("image", dataUrlToFile(reference.dataUrl, reference.name || `reference-${index + 1}.png`, reference.type)));
-        if (task.mask) formData.set("mask", dataUrlToFile(task.mask.dataUrl, task.mask.name || "mask.png", task.mask.type));
+        let formData: FormData;
+        try {
+            formData = await buildImageEditFormData(task, quality, requestSize, origin, cookie, "b64_json");
+        } catch {
+            return runOpenAiJsonImageEditTask(task, url, origin, quality, requestSize, cookie, "b64_json");
+        }
         const response = await taskFetch(config, url, { method: "POST", headers, body: formData, cache: "no-store" });
         if (!response.ok) {
             const message = await readFetchError(response, "图片生成失败");
-            if (shouldFallbackToJsonImageEdit(response.status, message)) return runOpenAiJsonImageEditTask(task, url, quality, requestSize, cookie, "b64_json");
+            if (shouldFallbackToJsonImageEdit(response.status, message)) return runOpenAiJsonImageEditTask(task, url, origin, quality, requestSize, cookie, "b64_json");
             if (shouldFallbackToResponsesImage(response.status, message)) return runOpenAiResponsesImageTask(task, origin, cookie);
             throw new Error(message);
         }
@@ -325,7 +341,7 @@ async function runOpenAiResponsesImageTask(task: ImageTask, origin: string, cook
     headers.set("content-type", "application/json");
     let lastError = "";
 
-    for (const body of buildResponsesImageBodies(task)) {
+    for (const body of buildResponsesImageBodies(task, origin)) {
         const response = await taskFetch(config, url, { method: "POST", headers, body: JSON.stringify(body), cache: "no-store" });
         if (!response.ok) {
             lastError = await readFetchError(response, "图片生成失败");
@@ -340,9 +356,9 @@ async function runOpenAiResponsesImageTask(task: ImageTask, origin: string, cook
     throw new Error(lastError || "图片生成失败");
 }
 
-function buildResponsesImageBodies(task: ImageTask) {
+function buildResponsesImageBodies(task: ImageTask, origin: string) {
     const prompt = withSystemPrompt(task.config, task.prompt);
-    const imageContent = task.references.map((reference) => ({ type: "input_image", image_url: reference.dataUrl }));
+    const imageContent = task.references.map((reference) => ({ type: "input_image", image_url: referenceRequestUrl(reference, origin) }));
     const content = [{ type: "input_text", text: prompt }, ...imageContent];
     return [
         {
@@ -366,11 +382,57 @@ function buildResponsesImageBodies(task: ImageTask) {
     ];
 }
 
+function buildJsonImageEditBodies(task: ImageTask, quality: string | undefined, requestSize: string | undefined, responseFormat: (typeof IMAGE_RESPONSE_FORMATS)[number], origin: string) {
+    const images = task.references.map((reference) => referenceRequestUrl(reference, origin)).filter(Boolean);
+    const mask = task.mask ? referenceRequestUrl(task.mask, origin) : "";
+    const base = {
+        model: task.config.model,
+        prompt: withSystemPrompt(task.config, task.prompt),
+        n: 1,
+        ...(quality ? { quality } : {}),
+        ...(requestSize ? { size: requestSize } : {}),
+        response_format: responseFormat,
+        output_format: IMAGE_OUTPUT_FORMAT,
+        ...(mask ? { mask } : {}),
+    };
+    if (!images.length) return [base];
+    const first = images[0];
+    return [
+        { ...base, ...(images.length === 1 ? { image: first } : {}), images },
+        { ...base, image_url: first },
+        { ...base, input_image: first },
+        { ...base, image: first },
+        { ...base, images: images.map((item) => ({ url: item })) },
+    ];
+}
+
+function referenceRequestUrl(reference: ImageTaskReference, origin = "") {
+    const dataUrl = (reference.dataUrl || "").trim();
+    if (/^data:image\//i.test(dataUrl)) return dataUrl;
+    const remoteUrl = (reference.url || "").trim();
+    if (isRemoteMediaUrl(remoteUrl)) return remoteUrl;
+    return normalizeReferenceRequestUrl(dataUrl, origin);
+}
+
+function normalizeReferenceRequestUrl(value: string, origin: string) {
+    const url = value.trim();
+    if (!url || isRemoteMediaUrl(url) || /^(data|blob):/i.test(url) || !origin) return url;
+    try {
+        const absolute = new URL(url, origin);
+        const proxiedUrl = absolute.searchParams.get("url") || "";
+        if ((absolute.pathname === "/api/media-proxy" || /^\/api\/ai\/system\/[^/]+\/_media$/.test(absolute.pathname)) && isRemoteMediaUrl(proxiedUrl)) return proxiedUrl;
+        if (url.startsWith("/")) return absolute.toString();
+    } catch {
+        return url;
+    }
+    return url;
+}
+
 async function runGeminiImageTask(task: ImageTask, origin: string, cookie: string) {
     if (task.mask) throw new Error("Gemini 暂不支持蒙版编辑");
     const config = task.config;
     const parts: GeminiPart[] = [{ text: withSystemPrompt(config, task.prompt) }];
-    task.references.forEach((reference) => parts.push(toGeminiImagePart(reference.dataUrl, reference.type)));
+    task.references.forEach((reference) => parts.push(toGeminiImagePart(referenceRequestUrl(reference, origin), reference.type)));
     const response = await taskFetch(config, `${geminiApiUrl(config, "generateContent", origin)}`, {
         method: "POST",
         headers: geminiHeaders(config, cookie),
@@ -396,17 +458,23 @@ function publicTask(task: ImageTask) {
 
 function sanitizeConfig(config?: ImageTaskConfig): ImageTaskConfig | null {
     if (!config?.baseUrl?.trim() || !config?.model?.trim()) return null;
-    if (config.apiSource !== "system" && !config.apiKey?.trim()) return null;
+    if (config.apiSource !== "system" || !config.baseUrl.trim().startsWith("/api/ai/system/")) return null;
     return {
-        apiSource: config.apiSource === "system" ? "system" : "custom",
+        apiSource: "system",
         baseUrl: config.baseUrl.trim(),
-        apiKey: config.apiKey || "",
+        apiKey: "system",
         apiFormat: config.apiFormat === "gemini" ? "gemini" : "openai",
-        model: config.model.trim(),
+        model: rawModelName(config.model),
         quality: config.quality || "auto",
         size: config.size || "auto",
-        systemPrompt: config.systemPrompt || "",
+        systemPrompt: "",
     };
+}
+
+function rawModelName(value: string) {
+    const model = value.trim();
+    const separator = model.indexOf("::");
+    return separator >= 0 ? model.slice(separator + 2).trim() : model;
 }
 
 function taskUrl(config: ImageTaskConfig, path: string, origin: string) {
@@ -418,9 +486,18 @@ function normalizeApiBaseUrl(baseUrl: string, apiFormat: "openai" | "gemini", or
     const absoluteBase = baseUrl.startsWith("/") ? `${origin}${baseUrl}` : baseUrl;
     const normalized = absoluteBase.trim().replace(/\/+$/, "");
     const lower = normalized.toLowerCase();
+    if (isInternalSystemProxyBase(normalized)) return normalized;
     if (lower.endsWith("/v1") || lower.endsWith("/v1beta") || lower.endsWith("/api/v3") || lower.endsWith("/api/plan/v3")) return normalized;
     if (apiFormat === "gemini") return `${normalized}/v1beta`;
     return `${normalized}/v1`;
+}
+
+function isInternalSystemProxyBase(value: string) {
+    try {
+        return /^\/api\/ai\/system\/[^/]+$/i.test(new URL(value).pathname);
+    } catch {
+        return false;
+    }
 }
 
 function taskHeaders(config: ImageTaskConfig, cookie: string) {
@@ -706,7 +783,7 @@ function resolveProxiedMediaSource(value: string, origin: string) {
 function shouldFallbackToJsonImageEdit(status: number, message: string) {
     if (status === 404 || status === 405 || status === 415) return true;
     if (status !== 400 && status !== 422) return false;
-    return /multipart|form-?data|file upload|image url|images\[\]|unsupported|not supported/i.test(message);
+    return /multipart|form-?data|file upload|prompt.*required|required.*prompt|image url|image file|input image|reference image|invalid image|images\[\]|unsupported|not supported/i.test(message);
 }
 
 function shouldTryNextImageResponseFormat(responseFormat: (typeof IMAGE_RESPONSE_FORMATS)[number], status: number, message: string) {
@@ -714,6 +791,11 @@ function shouldTryNextImageResponseFormat(responseFormat: (typeof IMAGE_RESPONSE
     if (responseFormat === "url") return /response[_ -]?format|url|unsupported|not supported|invalid/i.test(message);
     if (responseFormat === "b64_json") return /response[_ -]?format|b64|base64|unsupported|not supported|invalid/i.test(message);
     return false;
+}
+
+function shouldRetryJsonImageEditPayload(status: number, message: string) {
+    if (status === 400 || status === 422) return /image|images|image_url|input_image|reference|invalid type|unmarshal|deserialize|field/i.test(message);
+    return status >= 500 && /task[_ -]?id is empty|invalid_response|invalid type|unmarshal|deserialize/i.test(message);
 }
 
 function shouldFallbackToResponsesImage(status: number, message: string) {
@@ -753,10 +835,49 @@ function toGeminiImagePart(dataUrl: string, fallbackType?: string): GeminiPart {
     return { fileData: { fileUri: dataUrl, mimeType: fallbackType || "image/png" } };
 }
 
+async function buildImageEditFormData(task: ImageTask, quality: string | undefined, requestSize: string | undefined, origin: string, cookie: string, responseFormat: (typeof IMAGE_RESPONSE_FORMATS)[number]) {
+    const formData = new FormData();
+    formData.set("model", task.config.model);
+    formData.set("prompt", withSystemPrompt(task.config, task.prompt));
+    formData.set("n", "1");
+    formData.set("response_format", responseFormat);
+    formData.set("output_format", IMAGE_OUTPUT_FORMAT);
+    if (quality) formData.set("quality", quality);
+    if (requestSize) formData.set("size", requestSize);
+    const referenceFiles = await Promise.all(task.references.map((reference, index) => imageReferenceToFile(reference, reference.name || `reference-${index + 1}.png`, origin, cookie)));
+    referenceFiles.forEach((file) => formData.append("image", file));
+    if (task.mask) formData.set("mask", await imageReferenceToFile(task.mask, task.mask.name || "mask.png", origin, cookie));
+    return formData;
+}
+
+async function imageReferenceToFile(reference: ImageTaskReference, name: string, origin: string, cookie: string) {
+    const value = referenceRequestUrl(reference);
+    if (!value) throw new Error("参考图读取失败");
+    if (/^data:image\//i.test(value)) return dataUrlToFile(value, name, reference.type);
+    if (/^blob:/i.test(value)) throw new Error("参考图本地缓存已失效，请重新上传参考图");
+    const fetchUrl = value.startsWith("/") ? `${origin}${value}` : value;
+    if (!isRemoteMediaUrl(fetchUrl)) throw new Error("参考图地址无效，请重新上传参考图");
+    const response = await fetch(fetchUrl, {
+        headers: cookie && value.startsWith("/") ? { cookie } : undefined,
+        cache: "no-store",
+        signal: AbortSignal.timeout(INLINE_IMAGE_TIMEOUT_MS),
+    });
+    if (!response.ok || !response.body) throw new Error("参考图读取失败");
+    const contentLength = Number(response.headers.get("content-length") || 0);
+    if (contentLength > MAX_INLINE_IMAGE_BYTES) throw new Error("参考图过大，请压缩后重试");
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (!bytes.length) throw new Error("参考图读取失败");
+    if (bytes.length > MAX_INLINE_IMAGE_BYTES) throw new Error("参考图过大，请压缩后重试");
+    const mimeType = response.headers.get("content-type")?.split(";", 1)[0] || reference.type || "image/png";
+    if (!mimeType.startsWith("image/")) throw new Error("参考图不是有效图片");
+    return new File([bytes], name, { type: mimeType });
+}
+
 function dataUrlToFile(dataUrl: string, name: string, fallbackType?: string) {
     const match = dataUrl.match(/^data:([^;,]+);base64,(.+)$/);
-    if (!match) return new File([new Blob([])], name, { type: fallbackType || "image/png" });
+    if (!match) throw new Error("参考图不是有效 base64 图片");
     const bytes = Buffer.from(match[2], "base64");
+    if (!bytes.length) throw new Error("参考图读取失败");
     return new File([bytes], name, { type: fallbackType || match[1] || "image/png" });
 }
 

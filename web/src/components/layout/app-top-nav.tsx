@@ -1,7 +1,6 @@
 "use client";
 
 import { Menu } from "lucide-react";
-import dynamic from "next/dynamic";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -10,7 +9,7 @@ import { navigationTools, type NavigationToolSlug } from "@/constant/navigation-
 import { MobileNavDrawer } from "@/components/layout/mobile-nav-drawer";
 import { UserStatusActions } from "@/components/layout/user-status-actions";
 import { cn } from "@/lib/utils";
-import { normalizeGenerationConcurrency, normalizeGenerationPointMultipliers, useConfigStore, type GenerationConcurrencySettings, type GenerationPointMultipliers } from "@/stores/use-config-store";
+import { applyPublicSystemSettings, useConfigStore, type PublicSystemSettings } from "@/stores/use-config-store";
 import { type LocalUser, useUserStore } from "@/stores/use-user-store";
 
 type PublicSiteSettings = {
@@ -18,45 +17,33 @@ type PublicSiteSettings = {
     logoUrl: string;
 };
 
-const loadAppConfigModal = () => import("@/components/layout/app-config-modal").then((module) => module.AppConfigModal);
-
-const AppConfigModal = dynamic(loadAppConfigModal, {
-    ssr: false,
-    loading: () => null,
-});
-
 export function AppTopNav() {
     const pathname = usePathname();
     const router = useRouter();
     const [mobileNavOpen, setMobileNavOpen] = useState(false);
     const [site, setSite] = useState<PublicSiteSettings>({ title: "VOZEB", logoUrl: "/logo.svg" });
     const setUser = useUserStore((state) => state.setUser);
-    const updateConfig = useConfigStore((state) => state.updateConfig);
-    const isConfigOpen = useConfigStore((state) => state.isConfigOpen);
-    const shouldPromptContinue = useConfigStore((state) => state.shouldPromptContinue);
+    const setConfig = useConfigStore((state) => state.setConfig);
     const hideHeader = /^\/canvas\/[^/]+/.test(pathname);
     const slug = pathname.split("/").filter(Boolean)[0];
     const activeToolSlug = navigationTools.some((tool) => tool.slug === slug) ? (slug as NavigationToolSlug) : undefined;
 
     useEffect(() => {
         void fetch("/api/auth/session")
-            .then((response) => response.json() as Promise<{ user?: LocalUser | null; settings?: { site?: PublicSiteSettings; modelPointCosts?: Record<string, number>; generationPointMultipliers?: GenerationPointMultipliers; generationConcurrency?: GenerationConcurrencySettings } }>)
+            .then(
+                (response) =>
+                    response.json() as Promise<{
+                        user?: LocalUser | null;
+                        settings?: PublicSystemSettings & { site?: PublicSiteSettings };
+                    }>,
+            )
             .then((payload) => {
                 if (payload.settings?.site) setSite(payload.settings.site);
                 if (payload.user) setUser(payload.user);
-                updateConfig("modelPointCosts", payload.settings?.modelPointCosts || {});
-                if (payload.settings?.generationPointMultipliers) updateConfig("generationPointMultipliers", normalizeGenerationPointMultipliers(payload.settings.generationPointMultipliers));
-                if (payload.settings?.generationConcurrency) updateConfig("generationConcurrency", normalizeGenerationConcurrency(payload.settings.generationConcurrency));
+                setConfig(applyPublicSystemSettings(useConfigStore.getState().config, payload.settings));
             })
             .catch(() => undefined);
-    }, [setUser, updateConfig]);
-
-    useEffect(() => {
-        if (isConfigOpen || shouldPromptContinue) return;
-        return preloadOnIdle(() => {
-            void loadAppConfigModal();
-        });
-    }, [isConfigOpen, shouldPromptContinue]);
+    }, [setUser, setConfig]);
 
     return (
         <>
@@ -108,20 +95,8 @@ export function AppTopNav() {
             ) : null}
 
             <MobileNavDrawer open={mobileNavOpen} activeToolSlug={activeToolSlug} onClose={() => setMobileNavOpen(false)} />
-            {isConfigOpen || shouldPromptContinue ? <AppConfigModal /> : null}
         </>
     );
-}
-
-function preloadOnIdle(task: () => void) {
-    const idleWindow = window as Window & {
-        requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
-        cancelIdleCallback?: (handle: number) => void;
-    };
-    const idleId = idleWindow.requestIdleCallback?.(task, { timeout: 2500 });
-    if (idleId !== undefined) return () => idleWindow.cancelIdleCallback?.(idleId);
-    const timer = window.setTimeout(task, 1200);
-    return () => window.clearTimeout(timer);
 }
 
 function SiteLogo({ logoUrl, className }: { logoUrl: string; className: string }) {

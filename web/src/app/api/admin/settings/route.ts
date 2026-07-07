@@ -26,13 +26,14 @@ export async function PATCH(request: Request) {
         if (typeof body.registrationEnabled === "boolean") patch.registrationEnabled = body.registrationEnabled;
         if (typeof body.emailRegistrationEnabled === "boolean") patch.emailRegistrationEnabled = body.emailRegistrationEnabled;
         if (body.mail) patch.mail = body.mail;
-        if (typeof body.allowUserApiConfig === "boolean") patch.allowUserApiConfig = body.allowUserApiConfig;
         if (typeof body.defaultPoints === "number") patch.defaultPoints = body.defaultPoints;
         if (typeof body.checkInRewardPoints === "number") patch.checkInRewardPoints = body.checkInRewardPoints;
         if (body.modelPointCosts && typeof body.modelPointCosts === "object") patch.modelPointCosts = body.modelPointCosts;
         if (body.generationPointMultipliers && typeof body.generationPointMultipliers === "object") patch.generationPointMultipliers = body.generationPointMultipliers;
         if (body.generationConcurrency && typeof body.generationConcurrency === "object") patch.generationConcurrency = body.generationConcurrency;
+        if (body.generationDefaults && typeof body.generationDefaults === "object") patch.generationDefaults = body.generationDefaults;
         if (body.generationAssetStorage && typeof body.generationAssetStorage === "object") patch.generationAssetStorage = body.generationAssetStorage;
+        if (body.webdav && typeof body.webdav === "object") patch.webdav = body.webdav;
         if (Array.isArray(body.systemChannels)) patch.systemChannels = body.systemChannels;
         if (body.defaultModels) patch.defaultModels = body.defaultModels;
         if (!Object.keys(patch).length) return NextResponse.json({ error: "没有可更新的设置" }, { status: 400 });

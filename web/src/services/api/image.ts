@@ -667,8 +667,8 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
 
 export async function createImageGenerationTask(config: AiConfig, prompt: string, references: ReferenceImage[] = [], mask?: ReferenceImage, options?: RequestOptions): Promise<ImageGenerationTask> {
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
-    const taskReferences = await Promise.all(references.map(async (reference) => ({ id: reference.id, name: reference.name, type: reference.type, dataUrl: await imageToDataUrl(reference) })));
-    const taskMask = mask ? { id: mask.id, name: mask.name, type: mask.type, dataUrl: await imageToDataUrl(mask) } : undefined;
+    const taskReferences = await Promise.all(references.map(referenceToTaskInput));
+    const taskMask = mask ? await referenceToTaskInput(mask) : undefined;
     const response = await fetch("/api/image-tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -682,7 +682,7 @@ export async function createImageGenerationTask(config: AiConfig, prompt: string
                 model: requestConfig.model,
                 quality: requestConfig.quality,
                 size: requestConfig.size,
-                systemPrompt: requestConfig.systemPrompt,
+                systemPrompt: "",
             },
             prompt,
             references: taskReferences,
@@ -697,6 +697,18 @@ export async function createImageGenerationTask(config: AiConfig, prompt: string
     const payload = (await response.json()) as ImageTaskPayload;
     if (!payload.task?.id) throw new Error(payload.error || "创建图片任务失败");
     return payload.task;
+}
+
+async function referenceToTaskInput(reference: ReferenceImage) {
+    const dataUrl = (await imageToDataUrl(reference)).trim();
+    if (!dataUrl) throw new Error("参考图读取失败，请重新上传参考图");
+    if (dataUrl.startsWith("blob:")) throw new Error("参考图本地缓存已失效，请重新上传参考图");
+    const remoteUrl = isRemoteReferenceUrl(reference.url) ? reference.url : isRemoteReferenceUrl(reference.dataUrl) ? reference.dataUrl : undefined;
+    return { id: reference.id, name: reference.name, type: reference.type, dataUrl, url: remoteUrl };
+}
+
+function isRemoteReferenceUrl(value?: string) {
+    return /^https?:\/\//i.test(value || "");
 }
 
 export async function waitForImageGenerationTask(config: AiConfig, task: ImageGenerationTask, options?: RequestOptions) {

@@ -53,7 +53,7 @@ export function requestCreditCost(options: { apiSource?: "system" | "custom"; mo
 }
 
 export function creditCostLabel(cost: number) {
-    return cost > 0 ? `消耗 ${formatCreditAmount(cost)} 积分` : "自定义接口不扣积分";
+    return cost > 0 ? `消耗 ${formatCreditAmount(cost)} 积分` : "本次不扣积分";
 }
 
 type CreditCostOptions = {
@@ -81,14 +81,18 @@ function multiplierValue(values: Record<string, number> | undefined, key: string
 }
 
 function normalizeImageQualityKey(value: unknown) {
-    const key = String(value || "auto").trim().toLowerCase();
+    const key = String(value || "auto")
+        .trim()
+        .toLowerCase();
     if (key === "hd") return "high";
     if (key === "standard") return "medium";
     return key || "auto";
 }
 
 function normalizeVideoQualityKey(value: unknown) {
-    const key = String(value || "720").trim().toLowerCase();
+    const key = String(value || "720")
+        .trim()
+        .toLowerCase();
     if (key === "low") return "480";
     if (key === "auto" || key === "medium" || key === "high") return "720";
     return key.replace(/p$/, "") || "720";

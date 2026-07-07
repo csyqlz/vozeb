@@ -119,9 +119,9 @@ export const imageToolDefinitions: ImageToolDefinition[] = [
     {
         id: "superResolve",
         defaultVisible: false,
-        panelLabel: "超分",
-        label: "超分",
-        title: "AI 超分",
+        panelLabel: "超分放大",
+        label: "超分放大",
+        title: "使用高清放大生成更高分辨率图片",
         icon: () => <Sparkles className="size-4" />,
         run: (node, handlers) => handlers.onSuperResolve(node),
     },

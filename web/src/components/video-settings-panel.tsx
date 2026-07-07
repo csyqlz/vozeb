@@ -4,17 +4,7 @@ import { type ReactNode } from "react";
 import { Switch } from "antd";
 
 import { ImageSettingsTheme } from "@/components/image-settings-panel";
-import {
-    boolConfig,
-    isSeedanceFastModel,
-    isSeedanceVideoConfig,
-    normalizeSeedanceDuration,
-    normalizeSeedanceRatio,
-    normalizeSeedanceResolution,
-    seedancePixelLabel,
-    seedanceRatioOptions,
-    seedanceResolutionOptions,
-} from "@/lib/seedance-video";
+import { boolConfig, isSeedanceFastModel, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution, seedancePixelLabel, seedanceRatioOptions, seedanceResolutionOptions } from "@/lib/seedance-video";
 import { type CanvasTheme } from "@/lib/canvas-theme";
 import { modelOptionName, type AiConfig } from "@/stores/use-config-store";
 

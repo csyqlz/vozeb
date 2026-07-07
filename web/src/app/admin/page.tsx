@@ -44,7 +44,7 @@ export default async function AdminPage() {
                             />
                             <span className="truncate">管理后台</span>
                         </Link>
-                        <UserStatusActions showConfig={false} />
+                        <UserStatusActions />
                     </div>
                 </header>
 

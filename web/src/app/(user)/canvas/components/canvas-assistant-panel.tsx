@@ -601,15 +601,12 @@ export function CanvasAssistantPanel({
                                 }}
                             />
                         </Tooltip>
-                        <Tooltip title="配置">
-                            <Button type="text" shape="circle" className="!h-8 !w-8 !min-w-8" style={iconButtonStyle} icon={<Settings2 className="size-4" />} onClick={() => openConfigDialog(false)} />
-                        </Tooltip>
                     </>
                 }
             />
 
             {view === "setup" ? (
-                <OnlineAgentSetupView theme={theme} activeModel={activeModel} onOpenConfig={() => openConfigDialog(true)} />
+                <OnlineAgentSetupView theme={theme} activeModel={activeModel} />
             ) : (
                 <div className="thin-scrollbar min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
                     {view === "history" ? (
@@ -862,14 +859,14 @@ function AssistantHistory({ sessions, activeSession, onOpen, onDelete }: { sessi
     );
 }
 
-function OnlineAgentSetupView({ theme, activeModel, onOpenConfig }: { theme: (typeof canvasThemes)[keyof typeof canvasThemes]; activeModel: string; onOpenConfig: () => void }) {
+function OnlineAgentSetupView({ theme, activeModel }: { theme: (typeof canvasThemes)[keyof typeof canvasThemes]; activeModel: string }) {
     return (
         <div className="thin-scrollbar min-h-0 flex-1 overflow-y-auto p-4">
             <div className="space-y-4">
                 <div>
                     <div className="text-base font-semibold leading-6">连接配置</div>
                     <div className="mt-1 text-xs leading-5" style={{ color: theme.node.muted }}>
-                        网站 Agent 直接使用当前网页配置的文本模型和 API。
+                        网站 Agent 直接使用管理员后台设置的文本模型，不在前端展示上游接口。
                     </div>
                 </div>
                 <div className="rounded-lg border p-3" style={{ borderColor: theme.node.stroke }}>
@@ -880,9 +877,6 @@ function OnlineAgentSetupView({ theme, activeModel, onOpenConfig }: { theme: (ty
                                 {activeModel || "未配置模型"}
                             </div>
                         </div>
-                        <Button className="!h-8 !px-3" type="primary" icon={<Settings2 className="size-4" />} onClick={onOpenConfig}>
-                            配置
-                        </Button>
                     </div>
                 </div>
             </div>
@@ -1164,7 +1158,7 @@ function configNodeOp(id: string, input: Record<string, unknown>, x: number, y: 
             audioVoice: stringOptional(input.audioVoice) || config.audioVoice,
             audioFormat: stringOptional(input.audioFormat) || config.audioFormat,
             audioSpeed: stringOptional(input.audioSpeed) || config.audioSpeed,
-            audioInstructions: stringOptional(input.audioInstructions) || config.audioInstructions,
+            audioInstructions: stringOptional(input.audioInstructions) || "",
         }) as CanvasNodeData["metadata"],
     };
 }

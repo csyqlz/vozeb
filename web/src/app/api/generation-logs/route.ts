@@ -3,8 +3,7 @@ import { NextResponse } from "next/server";
 import { readJsonBody } from "@/lib/auth/request";
 import { getCurrentUser } from "@/lib/auth/session";
 import { getAuthSettings } from "@/lib/auth/store";
-import { deleteGenerationLogs, listGenerationLogs, recordGenerationLog, type GenerationLogInput } from "@/lib/server/generation-log-store";
-import type { GenerationLogAsset } from "@/lib/server/generation-log-store";
+import { deleteGenerationLogs, listGenerationLogs, listUserGenerationLogsForDelete, recordGenerationLog, type GenerationLogAsset, type GenerationLogInput } from "@/lib/server/generation-log-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,10 +19,7 @@ export async function GET(request: Request) {
     const source = url.searchParams.get("source") || undefined;
     const status = url.searchParams.get("status") || undefined;
     const keyword = url.searchParams.get("keyword") || undefined;
-    const [result, settings] = await Promise.all([
-        listGenerationLogs({ page, pageSize, kind, source, status, keyword, userId: currentUser.id }),
-        getAuthSettings(),
-    ]);
+    const [result, settings] = await Promise.all([listGenerationLogs({ page, pageSize, kind, source, status, keyword, userId: currentUser.id }), getAuthSettings()]);
 
     return NextResponse.json({
         ...result,
@@ -62,24 +58,10 @@ export async function DELETE(request: Request) {
     const requestedIds = Array.isArray(body.ids) ? Array.from(new Set(body.ids.map((id) => id.trim()).filter(Boolean))) : [];
     if (!requestedIds.length) return NextResponse.json({ deleted: 0 });
 
-    const userLogs = await listGenerationLogs({ userId: currentUser.id, pageSize: 100 });
-    const allowedIds = new Set(userLogs.items.map((log) => log.id));
-    const requestedIdSet = new Set(requestedIds.filter((id) => allowedIds.has(id)));
-    const requestedAssetUrls = new Set(
-        userLogs.items
-            .filter((log) => requestedIdSet.has(log.id))
-            .flatMap((log) => log.assets.map(stableAssetUrl).filter(Boolean)),
-    );
-    const deletableIds = userLogs.items
-        .filter((log) => requestedIdSet.has(log.id) || log.assets.some((asset) => requestedAssetUrls.has(stableAssetUrl(asset))))
-        .map((log) => log.id);
+    const deletableIds = (await listUserGenerationLogsForDelete(currentUser.id, requestedIds)).map((log) => log.id);
     if (!deletableIds.length) return NextResponse.json({ deleted: 0 });
 
     return NextResponse.json(await deleteGenerationLogs(deletableIds));
-}
-
-function stableAssetUrl(asset: GenerationLogAsset) {
-    return asset.remoteUrl || asset.serverUrl || asset.url || "";
 }
 
 function exposeAssetForUser(asset: GenerationLogAsset, settings: Awaited<ReturnType<typeof getAuthSettings>>["generationAssetStorage"]) {

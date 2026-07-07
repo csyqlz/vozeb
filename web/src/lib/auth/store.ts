@@ -41,6 +41,10 @@ export type GenerationConcurrencySettings = {
     video: number;
 };
 
+export type GenerationDefaultSettings = {
+    canvasImageCount: number;
+};
+
 export type GenerationPointMultipliers = {
     imageQuality: Record<string, number>;
     videoQuality: Record<string, number>;
@@ -52,6 +56,65 @@ export type GenerationAssetStorageSettings = {
     videoServerFallback: boolean;
     imageServerDownload: boolean;
     videoServerDownload: boolean;
+};
+
+export type WebdavSettings = {
+    enabled: boolean;
+    url: string;
+    username: string;
+    password: string;
+    directory: string;
+};
+
+export type CdkStatus = "active" | "disabled";
+
+export type PublicCdkRedemption = {
+    userId: string;
+    username: string;
+    displayName: string;
+    redeemedAt: string;
+};
+
+export type PublicCdkCode = {
+    id: string;
+    codePreview: string;
+    code?: string;
+    points: number;
+    maxRedemptions: number;
+    redeemedCount: number;
+    redemptions: PublicCdkRedemption[];
+    status: CdkStatus;
+    note: string;
+    expiresAt?: string;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type CreatedCdkCode = PublicCdkCode & {
+    code: string;
+};
+
+type StoredCdkRedemption = {
+    userId: string;
+    redeemedAt: string;
+};
+
+type StoredCdkCode = Omit<PublicCdkCode, "redemptions"> & {
+    codeHash: string;
+    redemptions: StoredCdkRedemption[];
+};
+
+export type PublicAnnouncement = {
+    id: string;
+    title: string;
+    content: string;
+    enabled: boolean;
+    popupHome: boolean;
+    popupAfterLogin: boolean;
+    startsAt?: string;
+    endsAt?: string;
+    createdAt: string;
+    updatedAt: string;
 };
 
 export type SiteSettings = {
@@ -192,7 +255,9 @@ export type AuthSettings = {
     modelPointCosts: ModelPointCosts;
     generationPointMultipliers: GenerationPointMultipliers;
     generationConcurrency: GenerationConcurrencySettings;
+    generationDefaults: GenerationDefaultSettings;
     generationAssetStorage: GenerationAssetStorageSettings;
+    webdav: WebdavSettings;
     systemChannels: SystemModelChannel[];
     defaultModels: SystemDefaultModels;
 };
@@ -205,6 +270,8 @@ type AuthDatabase = {
     pointRecords: StoredPointRecord[];
     checkIns: StoredCheckIn[];
     emailCodes: StoredEmailCode[];
+    cdkCodes: StoredCdkCode[];
+    announcements: PublicAnnouncement[];
     settings: AuthSettings;
 };
 
@@ -259,23 +326,32 @@ const DEFAULT_GENERATION_POINT_MULTIPLIERS: GenerationPointMultipliers = {
     videoQuality: { "480": 1, "720": 1, "1080": 1 },
     videoSeconds: { "-1": 1, "5": 1, "10": 1 },
 };
+const DEFAULT_WEBDAV_SETTINGS: WebdavSettings = {
+    enabled: false,
+    url: "",
+    username: "",
+    password: "",
+    directory: "vozeb",
+};
 const DEFAULT_SETTINGS: AuthSettings = {
     site: DEFAULT_SITE_SETTINGS,
     registrationEnabled: true,
     emailRegistrationEnabled: false,
     mail: DEFAULT_MAIL_SETTINGS,
-    allowUserApiConfig: true,
+    allowUserApiConfig: false,
     defaultPoints: DEFAULT_USER_POINTS,
     checkInRewardPoints: DEFAULT_CHECK_IN_REWARD_POINTS,
     modelPointCosts: {},
     generationPointMultipliers: DEFAULT_GENERATION_POINT_MULTIPLIERS,
     generationConcurrency: { image: 4, video: 1 },
+    generationDefaults: { canvasImageCount: 1 },
     generationAssetStorage: {
         imageServerFallback: true,
         videoServerFallback: true,
         imageServerDownload: false,
         videoServerDownload: false,
     },
+    webdav: DEFAULT_WEBDAV_SETTINGS,
     systemChannels: [],
     defaultModels: { imageModel: "", videoModel: "", textModel: "", audioModel: "" },
 };
@@ -304,13 +380,245 @@ export async function listPublicUsers() {
     return db.users.map((user) => toPublicUser(user, db)).sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
 }
 
-export async function listPointRecords(userId: string, limit = 50) {
+export type PointRecordListResult = {
+    records: PublicPointRecord[];
+    total: number;
+    page: number;
+    pageSize: number;
+};
+
+export async function listPointRecordsPage(userId: string, input?: { page?: number; pageSize?: number }): Promise<PointRecordListResult> {
     const db = await readAuthDb();
-    return (db.pointRecords || [])
+    const pageSize = Math.max(1, Math.min(50, Math.floor(Number(input?.pageSize) || 10)));
+    const page = Math.max(1, Math.floor(Number(input?.page) || 1));
+    const records = (db.pointRecords || [])
         .filter((record) => record.userId === userId)
         .map(toPublicPointRecord)
-        .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
-        .slice(0, Math.max(1, Math.min(200, Math.floor(Number(limit) || 50))));
+        .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+    const total = records.length;
+    const safePage = Math.min(page, Math.max(1, Math.ceil(total / pageSize)));
+    const start = (safePage - 1) * pageSize;
+    return {
+        records: records.slice(start, start + pageSize),
+        total,
+        page: safePage,
+        pageSize,
+    };
+}
+
+export async function listPointRecords(userId: string, limit = 50) {
+    const result = await listPointRecordsPage(userId, { page: 1, pageSize: Math.max(1, Math.min(200, Math.floor(Number(limit) || 50))) });
+    return result.records;
+}
+
+export type CdkListFilter = "all" | "redeemed" | "unused" | "expired";
+
+export type CdkListResult = {
+    codes: PublicCdkCode[];
+    total: number;
+    page: number;
+    pageSize: number;
+    stats: {
+        total: number;
+        redeemed: number;
+        unused: number;
+        expired: number;
+    };
+};
+
+export async function listCdkCodes(input?: { page?: number; pageSize?: number; keyword?: string; filter?: CdkListFilter }): Promise<CdkListResult> {
+    const db = await readAuthDb();
+    const keyword = normalizeText(input?.keyword, "", 120).toLowerCase();
+    const filter = input?.filter === "redeemed" || input?.filter === "unused" || input?.filter === "expired" ? input.filter : "all";
+    const pageSize = Math.max(1, Math.min(100, Math.floor(Number(input?.pageSize) || 20)));
+    const page = Math.max(1, Math.floor(Number(input?.page) || 1));
+    const allCodes = db.cdkCodes
+        .filter((code) => code.status === "active" && Boolean(code.code))
+        .map((code) => toPublicCdkCode(code, db, { includePlain: true }))
+        .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+    const stats = {
+        total: allCodes.length,
+        redeemed: allCodes.filter((code) => code.redeemedCount > 0).length,
+        unused: allCodes.filter((code) => !isCdkCodeExpired(code) && code.redeemedCount <= 0).length,
+        expired: allCodes.filter(isCdkCodeExpired).length,
+    };
+    const filtered = allCodes.filter((code) => {
+        const matchedFilter = filter === "all" || (filter === "redeemed" && code.redeemedCount > 0) || (filter === "unused" && !isCdkCodeExpired(code) && code.redeemedCount <= 0) || (filter === "expired" && isCdkCodeExpired(code));
+        if (!matchedFilter) return false;
+        if (!keyword) return true;
+        const redemptionsText = code.redemptions.map((item) => `${item.username} ${item.displayName}`).join(" ");
+        return [code.code || "", code.note, redemptionsText].some((value) => value.toLowerCase().includes(keyword));
+    });
+    const total = filtered.length;
+    const safePage = Math.min(page, Math.max(1, Math.ceil(total / pageSize)));
+    const start = (safePage - 1) * pageSize;
+    return {
+        codes: filtered.slice(start, start + pageSize),
+        total,
+        page: safePage,
+        pageSize,
+        stats,
+    };
+}
+
+export async function createCdkCodes(input: { count?: number; points?: number; maxRedemptions?: number; expiresAt?: string; expiresInDays?: number; note?: string }) {
+    return mutateAuthDb((db) => {
+        const count = Math.max(1, Math.min(100, Math.floor(Number(input.count) || 1)));
+        const points = normalizePoints(input.points, 10);
+        const maxRedemptions = Math.max(1, Math.min(10000, Math.floor(Number(input.maxRedemptions) || 1)));
+        const expiresAt = resolveCdkExpiresAt(input.expiresAt, input.expiresInDays);
+        const note = normalizeText(input.note, "", 120);
+        const now = new Date().toISOString();
+        const created: CreatedCdkCode[] = [];
+        for (let index = 0; index < count; index += 1) {
+            let code = generateCdkPlainCode();
+            let attempts = 0;
+            while (db.cdkCodes.some((item) => item.codeHash === hashToken(normalizeCdkCode(code))) && attempts < 8) {
+                code = generateCdkPlainCode();
+                attempts += 1;
+            }
+            const publicCode: PublicCdkCode = {
+                id: randomUUID(),
+                codePreview: previewCdkCode(code),
+                code,
+                points,
+                maxRedemptions,
+                redeemedCount: 0,
+                redemptions: [],
+                status: "active",
+                note,
+                ...(expiresAt ? { expiresAt } : {}),
+                createdAt: now,
+                updatedAt: now,
+            };
+            db.cdkCodes.push({
+                ...publicCode,
+                codeHash: hashToken(normalizeCdkCode(code)),
+                redemptions: [],
+            });
+            created.push({ ...publicCode, code });
+        }
+        return created;
+    });
+}
+
+export async function updateCdkCode(id: string, patch: Partial<Pick<PublicCdkCode, "status" | "note" | "expiresAt" | "points" | "maxRedemptions">>) {
+    return mutateAuthDb((db) => {
+        const item = db.cdkCodes.find((code) => code.id === id);
+        if (!item) throw new AuthInputError("CDK 不存在");
+        if (patch.status) item.status = patch.status === "active" ? "active" : "disabled";
+        if (patch.note !== undefined) item.note = normalizeText(patch.note, "", 120);
+        if (patch.expiresAt !== undefined) {
+            const expiresAt = normalizeOptionalIsoDate(patch.expiresAt);
+            if (expiresAt) item.expiresAt = expiresAt;
+            else delete item.expiresAt;
+        }
+        if (patch.points !== undefined) item.points = normalizePoints(patch.points, item.points);
+        if (patch.maxRedemptions !== undefined) item.maxRedemptions = Math.max(item.redeemedCount, Math.min(10000, Math.max(1, Math.floor(Number(patch.maxRedemptions) || item.maxRedemptions))));
+        item.updatedAt = new Date().toISOString();
+        return toPublicCdkCode(item, db, { includePlain: true });
+    });
+}
+
+export async function deleteCdkCode(id: string) {
+    return mutateAuthDb((db) => {
+        const index = db.cdkCodes.findIndex((code) => code.id === id);
+        if (index < 0) throw new AuthInputError("CDK 不存在");
+        db.cdkCodes.splice(index, 1);
+        return { ok: true, deleted: 1 };
+    });
+}
+
+export async function deleteCdkCodes(ids: string[]) {
+    return mutateAuthDb((db) => {
+        const deletingIds = Array.from(new Set(ids.map((id) => normalizeText(id, "", 80)).filter(Boolean)));
+        if (!deletingIds.length) throw new AuthInputError("请选择要删除的 CDK");
+        const before = db.cdkCodes.length;
+        db.cdkCodes = db.cdkCodes.filter((code) => !deletingIds.includes(code.id));
+        return { ok: true, deleted: before - db.cdkCodes.length };
+    });
+}
+
+export async function redeemCdkCode(userId: string, rawCode: string) {
+    return mutateAuthDb((db) => {
+        const code = normalizeCdkCode(rawCode);
+        if (!code) throw new AuthInputError("请输入 CDK 密钥");
+        const user = db.users.find((item) => item.id === userId);
+        if (!user || user.status !== "active") throw new AuthInputError("用户不可用");
+        const item = db.cdkCodes.find((entry) => entry.codeHash === hashToken(code));
+        if (!item || item.status !== "active") throw new AuthInputError("CDK 无效或已停用");
+        if (item.expiresAt && Date.parse(item.expiresAt) <= Date.now()) throw new AuthInputError("CDK 已过期");
+        if (item.redeemedCount >= item.maxRedemptions) throw new AuthInputError("CDK 已兑换完");
+        if (item.redemptions.some((entry) => entry.userId === userId)) throw new AuthInputError("该 CDK 已被当前账号兑换");
+
+        const points = normalizePoints(item.points, 0);
+        const now = new Date().toISOString();
+        user.pointsBalance = normalizePointAmount(normalizePoints(user.pointsBalance, db.settings.defaultPoints) + points, db.settings.defaultPoints);
+        user.updatedAt = now;
+        item.redemptions.push({ userId, redeemedAt: now });
+        item.redeemedCount = item.redemptions.length;
+        item.updatedAt = now;
+        addPointRecord(db, {
+            userId,
+            type: "admin-adjust",
+            amount: points,
+            balanceAfter: user.pointsBalance,
+            description: `CDK 兑换：${item.codePreview}`,
+            createdAt: now,
+        });
+        return { user: toPublicUser(user, db), points, cdk: toPublicCdkCode(item, db) };
+    });
+}
+
+export async function listAnnouncements(includeDisabled = false) {
+    const db = await readAuthDb();
+    return db.announcements.filter((announcement) => includeDisabled || isAnnouncementVisible(announcement)).sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+}
+
+export async function createAnnouncement(input: Partial<PublicAnnouncement>) {
+    return mutateAuthDb((db) => {
+        const now = new Date().toISOString();
+        const announcement = normalizeAnnouncement({
+            id: randomUUID(),
+            title: input.title || "",
+            content: input.content || "",
+            enabled: input.enabled !== false,
+            popupHome: input.popupHome === true,
+            popupAfterLogin: input.popupAfterLogin === true,
+            startsAt: input.startsAt,
+            endsAt: input.endsAt,
+            createdAt: now,
+            updatedAt: now,
+        });
+        if (!announcement.title || !announcement.content) throw new AuthInputError("请填写公告标题和内容");
+        db.announcements.push(announcement);
+        return announcement;
+    });
+}
+
+export async function updateAnnouncement(id: string, patch: Partial<PublicAnnouncement>) {
+    return mutateAuthDb((db) => {
+        const index = db.announcements.findIndex((announcement) => announcement.id === id);
+        if (index < 0) throw new AuthInputError("公告不存在");
+        const next = normalizeAnnouncement({
+            ...db.announcements[index],
+            ...patch,
+            id,
+            updatedAt: new Date().toISOString(),
+        });
+        if (!next.title || !next.content) throw new AuthInputError("请填写公告标题和内容");
+        db.announcements[index] = next;
+        return next;
+    });
+}
+
+export async function deleteAnnouncement(id: string) {
+    return mutateAuthDb((db) => {
+        const before = db.announcements.length;
+        db.announcements = db.announcements.filter((announcement) => announcement.id !== id);
+        if (before === db.announcements.length) throw new AuthInputError("公告不存在");
+        return { ok: true };
+    });
 }
 
 function toPublicPointRecord(record: StoredPointRecord): PublicPointRecord {
@@ -321,10 +629,10 @@ function displayPointRecordDescription(record: StoredPointRecord) {
     const description = record.description.trim();
     const model = (record.model || "").trim();
     if (!model) return description;
-    if (record.type === "consume" && description.startsWith("管理员接口调用：")) {
+    if (record.type === "consume") {
         return buildPointRecordDescription(model, legacyPointUsageKindFromModel(model), "consume");
     }
-    if (record.type === "admin-adjust" && description.startsWith("接口调用失败退回：")) {
+    if (record.type === "admin-adjust" && record.amount > 0) {
         return buildPointRecordDescription(model, legacyPointUsageKindFromModel(model), "refund");
     }
     return description;
@@ -340,7 +648,7 @@ function legacyPointUsageKindFromModel(model: string): PointUsageKind {
 export async function checkInUser(userId: string) {
     return mutateAuthDb((db) => {
         const user = db.users.find((item) => item.id === userId);
-        if (!user || user.status !== "active") throw new AuthInputError("账号不可用");
+        if (!user || user.status !== "active") throw new AuthInputError("用户不可用");
 
         const today = currentQuotaDate();
         if (db.checkIns.some((item) => item.userId === userId && item.date === today)) throw new AuthInputError("今天已经签到过了");
@@ -364,7 +672,7 @@ export async function checkInUser(userId: string) {
 export async function consumeUserPoints(userId: string, model: string, amount = 1, usageKind: PointUsageKind = "api") {
     return mutateAuthDb((db) => {
         const user = db.users.find((item) => item.id === userId);
-        if (!user || user.status !== "active") throw new AuthInputError("账号不可用");
+        if (!user || user.status !== "active") throw new AuthInputError("用户不可用");
 
         const multiplier = resolveModelPointCost(db.settings.modelPointCosts, model);
         const units = Math.min(1000, normalizePointAmount(amount, 1));
@@ -372,7 +680,7 @@ export async function consumeUserPoints(userId: string, model: string, amount = 
         const balance = normalizePoints(user.pointsBalance, db.settings.defaultPoints);
 
         if (cost > balance) {
-            throw new QuotaExceededError(`积分不足，当前余额 ${balance}，本次需要 ${cost}`);
+            throw new QuotaExceededError(`积分不足，当前余额 ${balance}，需要 ${cost}`);
         }
 
         user.pointsBalance = normalizePointAmount(balance - cost, 0);
@@ -422,7 +730,7 @@ export async function createUser(input: { username: string; email?: string; emai
         validatePassword(input.password);
 
         const firstUser = db.users.length === 0;
-        if (!firstUser && !db.settings.registrationEnabled) throw new AuthInputError("当前站点已关闭注册");
+        if (!firstUser && !db.settings.registrationEnabled) throw new AuthInputError("注册已关闭");
         if (!firstUser && db.settings.emailRegistrationEnabled && !email) throw new AuthInputError("请填写邮箱地址");
         if (email) validateEmail(email);
         if (db.users.some((user) => user.username.toLowerCase() === username.toLowerCase())) throw new AuthInputError("用户名已存在");
@@ -455,8 +763,8 @@ export async function createUserByAdmin(input: { username: string; email?: strin
         validateUsername(username);
         validatePassword(input.password);
         if (email) validateEmail(email);
-        if (db.users.some((user) => user.username.toLowerCase() === username.toLowerCase())) throw new AuthInputError("Username already exists");
-        if (email && db.users.some((user) => user.email?.toLowerCase() === email.toLowerCase())) throw new AuthInputError("Email already exists");
+        if (db.users.some((user) => user.username.toLowerCase() === username.toLowerCase())) throw new AuthInputError("用户名已存在");
+        if (email && db.users.some((user) => user.email?.toLowerCase() === email.toLowerCase())) throw new AuthInputError("邮箱已被注册");
 
         const now = new Date().toISOString();
         const pointsBalance = normalizePoints(input.pointsBalance, db.settings.defaultPoints);
@@ -478,7 +786,7 @@ export async function createUserByAdmin(input: { username: string; email?: strin
             type: "admin-adjust",
             amount: pointsBalance,
             balanceAfter: pointsBalance,
-            description: "Admin created user",
+            description: "管理员创建用户",
             createdAt: now,
         });
         return toPublicUser(user, db);
@@ -490,8 +798,8 @@ export async function authenticateUser(input: { username: string; password: stri
     const accountEmail = normalizeEmail(input.username);
     const db = await readAuthDb();
     const user = db.users.find((item) => item.username.toLowerCase() === account.toLowerCase() || (accountEmail && item.email?.toLowerCase() === accountEmail));
-    if (!user || !verifyPassword(input.password, user.passwordHash)) throw new AuthInputError("用户名、邮箱或密码不正确");
-    if (user.status !== "active") throw new AuthInputError("该账号已被禁用");
+    if (!user || !verifyPassword(input.password, user.passwordHash)) throw new AuthInputError("用户名或密码不正确");
+    if (user.status !== "active") throw new AuthInputError("账号已被禁用");
 
     await mutateAuthDb((nextDb) => {
         const nextUser = nextDb.users.find((item) => item.id === user.id);
@@ -521,13 +829,13 @@ export async function createEmailVerificationCode(input: { purpose: EmailCodePur
         }
 
         if (input.purpose === "password-reset" && !db.users.some((user) => user.email?.toLowerCase() === email.toLowerCase())) {
-            throw new AuthInputError("该邮箱未绑定账号");
+            throw new AuthInputError("没有找到绑定该邮箱的账号");
         }
 
         const code = randomNumericCode();
         const activeCode = db.emailCodes.find((item) => item.purpose === input.purpose && item.email === email && item.userId === input.userId && !item.consumedAt && Date.parse(item.expiresAt) > now.getTime());
         if (activeCode && now.getTime() - Date.parse(activeCode.createdAt) < EMAIL_CODE_RESEND_COOLDOWN_MS) {
-            throw new AuthInputError("验证码发送太频繁，请 60 秒后再试");
+            throw new AuthInputError("验证码发送过于频繁，请 60 秒后再试");
         }
         db.emailCodes = db.emailCodes.filter((item) => !(item.purpose === input.purpose && item.email === email && item.userId === input.userId && !item.consumedAt));
         db.emailCodes.push({
@@ -546,7 +854,7 @@ export async function createEmailVerificationCode(input: { purpose: EmailCodePur
 export async function updateOwnProfile(userId: string, input: { displayName?: string; email?: string; emailCode?: string }) {
     return mutateAuthDb((db) => {
         const user = db.users.find((item) => item.id === userId);
-        if (!user || user.status !== "active") throw new AuthInputError("账号不可用");
+        if (!user || user.status !== "active") throw new AuthInputError("用户不可用");
 
         if (input.displayName !== undefined) user.displayName = normalizeDisplayName(input.displayName || user.username);
 
@@ -569,7 +877,7 @@ export async function updateOwnProfile(userId: string, input: { displayName?: st
 export async function updateOwnPassword(userId: string, input: { currentPassword: string; newPassword: string }) {
     return mutateAuthDb((db) => {
         const user = db.users.find((item) => item.id === userId);
-        if (!user || user.status !== "active") throw new AuthInputError("账号不可用");
+        if (!user || user.status !== "active") throw new AuthInputError("用户不可用");
         if (!verifyPassword(input.currentPassword, user.passwordHash)) throw new AuthInputError("当前密码不正确");
         validatePassword(input.newPassword);
         user.passwordHash = hashPassword(input.newPassword);
@@ -584,7 +892,7 @@ export async function resetPasswordByEmail(input: { email: string; code?: string
         const email = normalizeEmail(input.email);
         validateEmail(email);
         const user = db.users.find((item) => item.email?.toLowerCase() === email);
-        if (!user || user.status !== "active") throw new AuthInputError("该邮箱未绑定可用账号");
+        if (!user || user.status !== "active") throw new AuthInputError("没有找到可用账号");
         consumeEmailCode(db, { purpose: "password-reset", email, code: input.code });
         validatePassword(input.newPassword);
         user.passwordHash = hashPassword(input.newPassword);
@@ -597,7 +905,7 @@ export async function resetPasswordByEmail(input: { email: string; code?: string
 export async function createSession(userId: string) {
     return mutateAuthDb((db) => {
         const user = db.users.find((item) => item.id === userId);
-        if (!user || user.status !== "active") throw new AuthInputError("账号不可用");
+        if (!user || user.status !== "active") throw new AuthInputError("用户不可用");
 
         const now = new Date();
         const sessionId = randomUUID();
@@ -637,7 +945,7 @@ export async function updateUserByAdmin(actorId: string, userId: string, patch: 
     return mutateAuthDb((db) => {
         const user = db.users.find((item) => item.id === userId);
         if (!user) throw new AuthInputError("用户不存在");
-        if (user.id === actorId && patch.status === "disabled") throw new AuthInputError("不能禁用当前管理员账号");
+        if (user.id === actorId && patch.status === "disabled") throw new AuthInputError("不能禁用当前登录的管理员账号");
 
         const nextRole = patch.role || user.role;
         const nextStatus = patch.status || user.status;
@@ -763,12 +1071,19 @@ function normalizeDb(db: Partial<AuthDatabase>): AuthDatabase {
         pointRecords: Array.isArray((db as Partial<AuthDatabase>).pointRecords) ? ((db as Partial<AuthDatabase>).pointRecords || []).map(normalizePointRecord).filter((item) => item.userId) : [],
         checkIns: Array.isArray(db.checkIns) ? db.checkIns.map(normalizeCheckIn).filter((item) => item.userId) : [],
         emailCodes: Array.isArray(db.emailCodes) ? db.emailCodes.map(normalizeEmailCode).filter((item) => item.email) : [],
+        cdkCodes: Array.isArray(db.cdkCodes) ? db.cdkCodes.map(normalizeCdkCodeRecord).filter((item) => item.codeHash) : [],
+        announcements: Array.isArray(db.announcements)
+            ? db.announcements
+                  .map(normalizeAnnouncement)
+                  .filter((item) => item.title && item.content)
+                  .slice(0, 200)
+            : [],
         settings,
     });
 }
 
 function emptyDb(): AuthDatabase {
-    return { version: 1, users: [], sessions: [], quotaUsage: [], pointRecords: [], checkIns: [], emailCodes: [], settings: DEFAULT_SETTINGS };
+    return { version: 1, users: [], sessions: [], quotaUsage: [], pointRecords: [], checkIns: [], emailCodes: [], cdkCodes: [], announcements: [], settings: DEFAULT_SETTINGS };
 }
 
 function pruneExpiredSessions(db: AuthDatabase) {
@@ -778,6 +1093,8 @@ function pruneExpiredSessions(db: AuthDatabase) {
     db.checkIns = db.checkIns.filter((checkIn) => checkIn.date >= minCheckInDate);
     db.pointRecords = (db.pointRecords || []).slice(-10000);
     db.emailCodes = (db.emailCodes || []).filter((item) => !item.consumedAt && Date.parse(item.expiresAt) > now);
+    db.cdkCodes = db.cdkCodes || [];
+    db.announcements = (db.announcements || []).slice(0, 200);
     return db;
 }
 
@@ -804,13 +1121,15 @@ function normalizeSettings(settings: AuthSettings): AuthSettings {
         registrationEnabled: Boolean(settings.registrationEnabled),
         emailRegistrationEnabled: Boolean(settings.emailRegistrationEnabled),
         mail: normalizeMailSettings(settings.mail),
-        allowUserApiConfig: settings.allowUserApiConfig !== false,
+        allowUserApiConfig: false,
         defaultPoints: normalizePoints(settings.defaultPoints, legacyQuotaToPoints(legacySettings.defaultQuota, DEFAULT_USER_POINTS)),
         checkInRewardPoints: normalizePoints(settings.checkInRewardPoints, legacyQuotaToPoints(legacySettings.checkInReward, DEFAULT_CHECK_IN_REWARD_POINTS)),
         modelPointCosts: normalizeModelPointCosts(settings.modelPointCosts),
         generationPointMultipliers: normalizeGenerationPointMultipliers(settings.generationPointMultipliers),
         generationConcurrency: normalizeGenerationConcurrency(settings.generationConcurrency),
+        generationDefaults: normalizeGenerationDefaults(settings.generationDefaults),
         generationAssetStorage: normalizeGenerationAssetStorage(settings.generationAssetStorage),
+        webdav: normalizeWebdavSettings(settings.webdav),
         systemChannels: Array.isArray(settings.systemChannels) ? settings.systemChannels.map(normalizeSystemChannel).filter((channel) => channel.name || channel.baseUrl || channel.models.length) : [],
         defaultModels: {
             imageModel: settings.defaultModels?.imageModel || "",
@@ -821,6 +1140,12 @@ function normalizeSettings(settings: AuthSettings): AuthSettings {
     };
 }
 
+function normalizeGenerationDefaults(settings: Partial<GenerationDefaultSettings> | undefined): GenerationDefaultSettings {
+    return {
+        canvasImageCount: Math.max(1, Math.min(10, Math.floor(Number(settings?.canvasImageCount) || DEFAULT_SETTINGS.generationDefaults.canvasImageCount))),
+    };
+}
+
 function normalizeGenerationAssetStorage(settings: Partial<GenerationAssetStorageSettings> | undefined): GenerationAssetStorageSettings {
     return {
         imageServerFallback: settings?.imageServerFallback !== false,
@@ -828,6 +1153,21 @@ function normalizeGenerationAssetStorage(settings: Partial<GenerationAssetStorag
         imageServerDownload: settings?.imageServerDownload === true,
         videoServerDownload: settings?.videoServerDownload === true,
     };
+}
+
+function normalizeWebdavSettings(settings: Partial<WebdavSettings> | undefined): WebdavSettings {
+    return {
+        enabled: settings?.enabled === true,
+        url: normalizeLinkUrl(settings?.url, ""),
+        username: normalizeText(settings?.username, "", 160),
+        password: typeof settings?.password === "string" ? settings.password.slice(0, 512) : "",
+        directory: normalizeWebdavDirectory(settings?.directory),
+    };
+}
+
+function normalizeWebdavDirectory(value: unknown) {
+    const directory = typeof value === "string" ? value.trim().replace(/^\/+|\/+$/g, "") : "";
+    return (directory || DEFAULT_WEBDAV_SETTINGS.directory).slice(0, 160);
 }
 
 function normalizeGenerationConcurrency(settings: Partial<GenerationConcurrencySettings> | undefined): GenerationConcurrencySettings {
@@ -870,7 +1210,7 @@ function normalizeSiteShowcaseItems(settings: unknown): SiteShowcaseItem[] {
                 coverUrl: normalizeLinkUrl(value.coverUrl, ""),
                 prompt,
                 tags: normalizeShowcaseTags(value.tags),
-                category: normalizeText(value.category, "首页展示", 40),
+                category: normalizeText(value.category, "精选展示", 40),
             };
         })
         .filter((item): item is SiteShowcaseItem => Boolean(item))
@@ -948,14 +1288,34 @@ function normalizeText(value: unknown, fallback: string, maxLength: number) {
 }
 
 function repairKnownMojibakeText(value: string) {
-    const replacements: Array<[string, string]> = [
-        ["闈㈠悜 AI 鍥剧墖鍒涗綔涓庣鐞嗙殑 VOZEB 宸ヤ綔鍙?", "面向 AI 图片创作与管理的 VOZEB 工作台"],
-        ["VOZEB,AI 缁樺浘,鏃犻檺鐢诲竷,鎻愮ず璇嶅簱,绱犳潗绠＄悊", "VOZEB,AI 绘图,无限画布,提示词库,素材管理"],
-        ["漏 2026 VOZEB. All rights reserved.", "© 2026 VOZEB. All rights reserved."],
-        ["QQ 閭", "QQ 邮箱"],
-        ["閭鑱旂郴", "邮箱联系"],
-    ];
-    return replacements.reduce((text, [from, to]) => text.replaceAll(from, to), value);
+    if (value.includes("VOZEB") && value.includes("AI") && !value.includes("绘图") && value.includes(",")) return "VOZEB,AI 绘图,无限画布,提示词库,素材管理";
+    if (value.includes("VOZEB") && value.includes("AI") && !value.includes("工作台")) return "面向 AI 图片创作与管理的 VOZEB 工作台";
+    if (value.includes("2026 VOZEB") && !value.startsWith("©")) return "© 2026 VOZEB. All rights reserved.";
+    if (value.startsWith("QQ ") && !value.includes("邮箱")) return "QQ 邮箱";
+    return repairUtf8MojibakeText(value);
+}
+
+function repairUtf8MojibakeText(value: string) {
+    if (!looksLikeUtf8Mojibake(value)) return value;
+    const repaired = Buffer.from(value, "latin1").toString("utf8");
+    if (!repaired || repaired.includes("\uFFFD")) return value;
+    return textQualityScore(repaired) > textQualityScore(value) ? repaired : value;
+}
+
+function looksLikeUtf8Mojibake(value: string) {
+    if (!value) return false;
+    if (/[\u0080-\u009f]/.test(value)) return true;
+    if (/[ÂÃ][\u0080-\u00ff]/.test(value)) return true;
+    const markers = value.match(/[åæçèéäöüï½ð]/g)?.length || 0;
+    return markers >= 2 && !/[\u4e00-\u9fff]/.test(value);
+}
+
+function textQualityScore(value: string) {
+    const cjk = value.match(/[\u4e00-\u9fff]/g)?.length || 0;
+    const controls = value.match(/[\u0080-\u009f]/g)?.length || 0;
+    const replacements = value.match(/\uFFFD/g)?.length || 0;
+    const mojibakeMarkers = value.match(/[ÂÃåæçèéäöüï½ð]/g)?.length || 0;
+    return cjk * 4 - controls * 6 - replacements * 20 - mojibakeMarkers;
 }
 
 function normalizeLogoUrl(value: unknown) {
@@ -976,7 +1336,7 @@ function normalizeLinkUrl(value: unknown, fallback: string) {
 function normalizeSystemChannel(channel: Partial<SystemModelChannel>): SystemModelChannel {
     return {
         id: channel.id?.trim() || randomUUID(),
-        name: channel.name?.trim() || "默认渠道",
+        name: repairKnownMojibakeText(channel.name?.trim() || "") || "通用接口",
         baseUrl: channel.baseUrl?.trim() || "",
         apiKey: channel.apiKey || "",
         apiFormat: channel.apiFormat === "gemini" ? "gemini" : "openai",
@@ -1023,11 +1383,7 @@ function normalizeMultiplierMap(value: unknown, defaults: Record<string, number>
     const entries = value && typeof value === "object" && !Array.isArray(value) ? Object.entries(value as Record<string, unknown>) : [];
     return {
         ...defaults,
-        ...Object.fromEntries(
-            entries
-                .map(([key, multiplier]) => [key.trim(), normalizePointMultiplier(multiplier)] as const)
-                .filter(([key]) => Boolean(key)),
-        ),
+        ...Object.fromEntries(entries.map(([key, multiplier]) => [key.trim(), normalizePointMultiplier(multiplier)] as const).filter(([key]) => Boolean(key))),
     };
 }
 
@@ -1038,9 +1394,9 @@ function resolveModelPointCost(costs: ModelPointCosts, model: string) {
 }
 
 function buildPointRecordDescription(model: string, usageKind: PointUsageKind, action: "consume" | "refund") {
-    const modelName = model.trim() || "模型";
+    const modelName = model.trim() || "默认模型";
     const actionLabels: Record<PointUsageKind, { consume: string; refund: string }> = {
-        api: { consume: "接口调用扣除", refund: "接口调用失败退回" },
+        api: { consume: "模型调用扣除", refund: "模型调用失败退回" },
         image: { consume: "生成图片调用扣除", refund: "生成图片调用失败退回" },
         video: { consume: "生成视频调用扣除", refund: "生成视频调用失败退回" },
         audio: { consume: "生成音频调用扣除", refund: "生成音频调用失败退回" },
@@ -1062,6 +1418,132 @@ function normalizeCheckIn(value: Partial<StoredCheckIn>): StoredCheckIn {
         rewardPoints: normalizePoints(value.rewardPoints, legacyQuotaToPoints(legacy.reward, DEFAULT_CHECK_IN_REWARD_POINTS)),
         createdAt: value.createdAt || new Date().toISOString(),
     };
+}
+
+function toPublicCdkCode(code: StoredCdkCode, db?: AuthDatabase, options?: { includePlain?: boolean }): PublicCdkCode {
+    return {
+        id: code.id,
+        codePreview: code.codePreview,
+        ...(options?.includePlain && code.code ? { code: code.code } : {}),
+        points: code.points,
+        maxRedemptions: code.maxRedemptions,
+        redeemedCount: code.redeemedCount,
+        redemptions: (code.redemptions || []).map((redemption) => {
+            const user = db?.users.find((item) => item.id === redemption.userId);
+            return {
+                userId: redemption.userId,
+                username: user?.username || "已删除用户",
+                displayName: user?.displayName || user?.username || "已删除用户",
+                redeemedAt: redemption.redeemedAt,
+            };
+        }),
+        status: code.status,
+        note: code.note,
+        expiresAt: code.expiresAt,
+        createdAt: code.createdAt,
+        updatedAt: code.updatedAt,
+    };
+}
+
+function isCdkCodeExpired(code: PublicCdkCode) {
+    return Boolean(code.expiresAt && Date.parse(code.expiresAt) <= Date.now());
+}
+
+function normalizeCdkCodeRecord(value: Partial<StoredCdkCode>): StoredCdkCode {
+    const redemptions = Array.isArray(value.redemptions)
+        ? value.redemptions
+              .map((item) => ({
+                  userId: typeof item?.userId === "string" ? item.userId : "",
+                  redeemedAt: typeof item?.redeemedAt === "string" ? item.redeemedAt : new Date().toISOString(),
+              }))
+              .filter((item) => item.userId)
+        : [];
+    const plainCode = formatCdkCodeForDisplay(value.code || "");
+    const codePreview = normalizeText(value.codePreview || (plainCode ? previewCdkCode(plainCode) : ""), "CDK-****", 40);
+    const codeHash = typeof value.codeHash === "string" && value.codeHash ? value.codeHash : plainCode ? hashToken(normalizeCdkCode(plainCode)) : "";
+    const now = new Date().toISOString();
+    return {
+        id: value.id || randomUUID(),
+        codePreview,
+        ...(plainCode ? { code: plainCode } : {}),
+        points: normalizePoints(value.points, 10),
+        maxRedemptions: Math.max(redemptions.length || 1, Math.min(10000, Math.floor(Number(value.maxRedemptions) || 1))),
+        redeemedCount: redemptions.length,
+        status: value.status === "disabled" ? "disabled" : "active",
+        note: normalizeText(value.note, "", 120),
+        codeHash,
+        redemptions,
+        ...(normalizeOptionalIsoDate(value.expiresAt) ? { expiresAt: normalizeOptionalIsoDate(value.expiresAt) } : {}),
+        createdAt: value.createdAt || now,
+        updatedAt: value.updatedAt || value.createdAt || now,
+    };
+}
+
+function normalizeCdkCode(value: string) {
+    return value
+        .trim()
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, "");
+}
+
+function generateCdkPlainCode() {
+    const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    const chars = Array.from(randomBytes(20), (byte) => alphabet[byte % alphabet.length]).join("");
+    return `VZ-${chars.slice(0, 5)}-${chars.slice(5, 10)}-${chars.slice(10, 15)}-${chars.slice(15, 20)}`;
+}
+
+function formatCdkCodeForDisplay(value: string) {
+    const code = normalizeCdkCode(value);
+    if (!code) return "";
+    if (code.startsWith("VZ") && code.length === 22) return `${code.slice(0, 2)}-${code.slice(2, 7)}-${code.slice(7, 12)}-${code.slice(12, 17)}-${code.slice(17, 22)}`;
+    return code;
+}
+
+function previewCdkCode(value: string) {
+    const code = normalizeCdkCode(value);
+    if (code.length <= 8) return `${code.slice(0, 2)}****`;
+    return `${code.slice(0, 4)}****${code.slice(-4)}`;
+}
+
+function normalizeAnnouncement(value: Partial<PublicAnnouncement>): PublicAnnouncement {
+    const now = new Date().toISOString();
+    const startsAt = normalizeOptionalIsoDate(value.startsAt);
+    const endsAt = normalizeOptionalIsoDate(value.endsAt);
+    return {
+        id: value.id || randomUUID(),
+        title: normalizeText(value.title, "", 80),
+        content: normalizeText(value.content, "", 3000),
+        enabled: value.enabled !== false,
+        popupHome: value.popupHome === true,
+        popupAfterLogin: value.popupAfterLogin === true,
+        ...(startsAt ? { startsAt } : {}),
+        ...(endsAt ? { endsAt } : {}),
+        createdAt: value.createdAt || now,
+        updatedAt: value.updatedAt || value.createdAt || now,
+    };
+}
+
+function isAnnouncementVisible(announcement: PublicAnnouncement) {
+    if (!announcement.enabled) return false;
+    const now = Date.now();
+    if (announcement.startsAt && Date.parse(announcement.startsAt) > now) return false;
+    if (announcement.endsAt && Date.parse(announcement.endsAt) <= now) return false;
+    return true;
+}
+
+function normalizeOptionalIsoDate(value: unknown) {
+    if (typeof value !== "string" || !value.trim()) return undefined;
+    const time = Date.parse(value);
+    if (!Number.isFinite(time)) return undefined;
+    return new Date(time).toISOString();
+}
+
+function resolveCdkExpiresAt(expiresAt: unknown, expiresInDays: unknown) {
+    const explicitDate = normalizeOptionalIsoDate(expiresAt);
+    if (explicitDate) return explicitDate;
+    const days = Math.floor(Number(expiresInDays));
+    if (!Number.isFinite(days) || days <= 0) return undefined;
+    return new Date(Date.now() + Math.min(days, 3650) * 24 * 60 * 60 * 1000).toISOString();
 }
 
 function normalizePointRecord(value: Partial<StoredPointRecord>): StoredPointRecord {
@@ -1098,7 +1580,7 @@ function normalizeEmailCode(value: Partial<StoredEmailCode>): StoredEmailCode {
 
 function consumeEmailCode(db: AuthDatabase, input: { purpose: EmailCodePurpose; email: string; code?: string; userId?: string }) {
     const code = typeof input.code === "string" ? input.code.trim() : "";
-    if (!/^\d{6}$/.test(code)) throw new AuthInputError("请填写 6 位邮箱验证码");
+    if (!/^\d{6}$/.test(code)) throw new AuthInputError("请输入 6 位邮箱验证码");
     const email = normalizeEmail(input.email);
     const item = db.emailCodes.find((entry) => entry.purpose === input.purpose && entry.email === email && entry.userId === input.userId && !entry.consumedAt && Date.parse(entry.expiresAt) > Date.now());
     if (!item || item.codeHash !== hashToken(code)) throw new AuthInputError("邮箱验证码不正确或已过期");
@@ -1120,7 +1602,7 @@ function currentQuotaDate() {
 }
 
 function validateUsername(username: string) {
-    if (!USERNAME_PATTERN.test(username)) throw new AuthInputError("用户名需为 3-32 位字母、数字、下划线、点或短横线");
+    if (!USERNAME_PATTERN.test(username)) throw new AuthInputError("用户名只能使用 3-32 位字母、数字、下划线、点或短横线");
 }
 
 function validateEmail(email: string) {

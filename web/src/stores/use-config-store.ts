@@ -73,34 +73,44 @@ export type WebdavSyncConfig = {
     lastSyncedAt: string;
 };
 
+export type PublicSystemSettings = {
+    modelPointCosts?: Record<string, number>;
+    generationPointMultipliers?: GenerationPointMultipliers;
+    generationConcurrency?: GenerationConcurrencySettings;
+    generationDefaults?: {
+        canvasImageCount?: number;
+    };
+    webdav?: {
+        enabled?: boolean;
+    };
+    defaultModels?: {
+        imageModel?: string;
+        videoModel?: string;
+        textModel?: string;
+        audioModel?: string;
+    };
+    systemChannels?: Array<ModelChannel & { enabled?: boolean; hasApiKey?: boolean }>;
+};
+
 export const CONFIG_STORE_KEY = appStorageKey("ai_config_store");
 migrateLocalStorageKey(CONFIG_STORE_KEY, legacyAppStorageKey("ai_config_store"));
 export type ModelCapability = "image" | "video" | "text" | "audio";
 const CHANNEL_MODEL_SEPARATOR = "::";
-const OPENAI_BASE_URL = "https://api.openai.com";
-const CONFIG_STORE_VERSION = 2;
+const DEFAULT_SYSTEM_BASE_URL = "";
+const CONFIG_STORE_VERSION = 3;
 
 export const defaultConfig: AiConfig = {
-    apiSource: "custom",
+    apiSource: "system",
     channelMode: "local",
-    baseUrl: OPENAI_BASE_URL,
+    baseUrl: DEFAULT_SYSTEM_BASE_URL,
     apiKey: "",
     apiFormat: "openai",
-    channels: [
-        {
-            id: "default",
-            name: "默认渠道",
-            baseUrl: OPENAI_BASE_URL,
-            apiKey: "",
-            apiFormat: "openai",
-            models: ["gpt-image-2", "grok-imagine-video", "gpt-5.5", "gpt-4o-mini-tts"],
-        },
-    ],
-    model: "default::gpt-image-2",
-    imageModel: "default::gpt-image-2",
-    videoModel: "default::grok-imagine-video",
-    textModel: "default::gpt-5.5",
-    audioModel: "default::gpt-4o-mini-tts",
+    channels: [],
+    model: "",
+    imageModel: "",
+    videoModel: "",
+    textModel: "",
+    audioModel: "",
     audioVoice: "alloy",
     audioFormat: "mp3",
     audioSpeed: "1",
@@ -110,11 +120,11 @@ export const defaultConfig: AiConfig = {
     videoGenerateAudio: "true",
     videoWatermark: "false",
     systemPrompt: "",
-    models: ["default::gpt-image-2", "default::grok-imagine-video", "default::gpt-5.5", "default::gpt-4o-mini-tts"],
-    imageModels: ["default::gpt-image-2"],
-    videoModels: ["default::grok-imagine-video"],
-    textModels: ["default::gpt-5.5"],
-    audioModels: ["default::gpt-4o-mini-tts"],
+    models: [],
+    imageModels: [],
+    videoModels: [],
+    textModels: [],
+    audioModels: [],
     quality: "auto",
     size: "1:1",
     count: "1",
@@ -139,12 +149,10 @@ export const defaultWebdavSyncConfig: WebdavSyncConfig = {
 
 type ConfigStore = {
     config: AiConfig;
-    webdav: WebdavSyncConfig;
     isConfigOpen: boolean;
     shouldPromptContinue: boolean;
     setConfig: (config: AiConfig) => void;
     updateConfig: <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
-    updateWebdavConfig: <K extends keyof WebdavSyncConfig>(key: K, value: WebdavSyncConfig[K]) => void;
     isAiConfigReady: (config: AiConfig, model: string) => boolean;
     openConfigDialog: (shouldPromptContinue?: boolean) => void;
     setConfigDialogOpen: (isOpen: boolean) => void;
@@ -206,14 +214,62 @@ function modelListKey(capability: ModelCapability) {
 
 function isAiConfigReady(config: AiConfig, model: string) {
     const channel = resolveModelChannel(config, model);
-    return Boolean(model.trim() && channel.baseUrl.trim() && channel.apiKey.trim());
+    if (config.apiSource === "system") return Boolean(model.trim() && channel.baseUrl.trim().startsWith("/api/ai/system/"));
+    return false;
+}
+
+export function applyPublicSystemSettings(config: AiConfig, settings?: PublicSystemSettings | null): AiConfig {
+    const channels = (settings?.systemChannels || [])
+        .filter((channel) => channel.enabled !== false && channel.models?.length)
+        .map((channel) => ({
+            id: channel.id,
+            name: channel.name,
+            baseUrl: channel.baseUrl?.startsWith("/api/ai/system/") ? channel.baseUrl : `/api/ai/system/${channel.id}`,
+            apiKey: "system",
+            apiFormat: channel.apiFormat === "gemini" ? ("gemini" as const) : ("openai" as const),
+            models: uniqueRawModels(channel.models || []),
+        }));
+    const models = modelOptionsFromChannels(channels);
+    const imageModels = filterModelsByCapability(models, "image");
+    const videoModels = filterModelsByCapability(models, "video");
+    const textModels = filterModelsByCapability(models, "text");
+    const audioModels = filterModelsByCapability(models, "audio");
+    const defaultModels = settings?.defaultModels || {};
+    const imageModel = chooseSystemModel(config.imageModel, defaultModels.imageModel, channels, imageModels);
+    const videoModel = chooseSystemModel(config.videoModel, defaultModels.videoModel, channels, videoModels);
+    const textModel = chooseSystemModel(config.textModel, defaultModels.textModel, channels, textModels);
+    const audioModel = chooseSystemModel(config.audioModel, defaultModels.audioModel, channels, audioModels);
+    return {
+        ...config,
+        apiSource: "system",
+        channelMode: "local",
+        channels,
+        baseUrl: channels[0]?.baseUrl || "",
+        apiKey: "system",
+        apiFormat: "openai",
+        models,
+        imageModels,
+        videoModels,
+        textModels,
+        audioModels,
+        imageModel,
+        videoModel,
+        textModel,
+        audioModel,
+        model: imageModel || textModel || videoModel || audioModel || "",
+        systemPrompt: "",
+        audioInstructions: "",
+        modelPointCosts: settings?.modelPointCosts || {},
+        generationPointMultipliers: normalizeGenerationPointMultipliers(settings?.generationPointMultipliers),
+        generationConcurrency: normalizeGenerationConcurrency(settings?.generationConcurrency),
+        canvasImageCount: normalizeCanvasImageCount(settings?.generationDefaults?.canvasImageCount),
+    };
 }
 
 export const useConfigStore = create<ConfigStore>()(
     persist(
         (set, get) => ({
             config: defaultConfig,
-            webdav: defaultWebdavSyncConfig,
             isConfigOpen: false,
             shouldPromptContinue: false,
             setConfig: (config) => set({ config }),
@@ -224,22 +280,18 @@ export const useConfigStore = create<ConfigStore>()(
                         [key]: value,
                     },
                 })),
-            updateWebdavConfig: (key, value) =>
-                set((state) => ({
-                    webdav: {
-                        ...state.webdav,
-                        [key]: value,
-                    },
-                })),
             isAiConfigReady: (config, model) => isAiConfigReady(config, model),
-            openConfigDialog: (shouldPromptContinue = false) => set({ isConfigOpen: true, shouldPromptContinue }),
-            setConfigDialogOpen: (isConfigOpen) => set({ isConfigOpen }),
+            openConfigDialog: (shouldPromptContinue = false) => {
+                if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("vozeb-system-config-missing", { detail: { shouldPromptContinue } }));
+                set({ isConfigOpen: false, shouldPromptContinue: false });
+            },
+            setConfigDialogOpen: () => set({ isConfigOpen: false, shouldPromptContinue: false }),
             clearPromptContinue: () => set({ shouldPromptContinue: false }),
         }),
         {
             name: CONFIG_STORE_KEY,
             version: CONFIG_STORE_VERSION,
-            partialize: (state) => ({ config: state.config, webdav: state.webdav }),
+            partialize: (state) => ({ config: state.config }),
             migrate: (persisted, version) => {
                 const persistedState = (persisted || {}) as Partial<ConfigStore>;
                 const persistedConfig = (persistedState.config || {}) as Partial<AiConfig>;
@@ -247,42 +299,49 @@ export const useConfigStore = create<ConfigStore>()(
                 if (version < 2 && persistedConfig.canvasImageCount === "3") {
                     config.canvasImageCount = defaultConfig.canvasImageCount;
                 }
-                return { config, webdav: { ...defaultWebdavSyncConfig, ...(persistedState.webdav || {}) } };
+                if (version < 3) {
+                    config.systemPrompt = "";
+                    config.audioInstructions = "";
+                }
+                return { config };
             },
             merge: (persisted, current) => {
                 const persistedState = (persisted || {}) as Partial<ConfigStore>;
                 const persistedConfig = (persistedState.config || {}) as Partial<AiConfig>;
-                const persistedWebdav = (persistedState.webdav || {}) as Partial<WebdavSyncConfig>;
-                const webdav = { ...defaultWebdavSyncConfig, ...persistedWebdav };
-                if (webdav.directory === "infinite-canvas" && !webdav.url && !webdav.username && !webdav.password && !webdav.lastSyncedAt) {
-                    webdav.directory = defaultWebdavSyncConfig.directory;
-                }
                 const config = { ...defaultConfig, ...persistedConfig };
                 if (!Array.isArray(persistedConfig.channels)) config.channels = [];
                 const channels = normalizeChannels(config);
                 const models = modelOptionsFromChannels(channels);
+                const imageModel = normalizeModelOptionValue(config.imageModel || config.model, channels);
+                const videoModel = normalizeModelOptionValue(config.videoModel || config.model, channels);
+                const textModel = normalizeModelOptionValue(config.textModel || config.model, channels);
+                const audioModel = normalizeModelOptionValue(config.audioModel || defaultConfig.audioModel, channels);
+                const model = normalizeModelOptionValue(config.model, channels) || imageModel || textModel || videoModel || audioModel;
                 return {
                     ...current,
-                    webdav,
                     config: {
                         ...config,
-                        apiSource: config.apiSource === "system" ? "system" : "custom",
+                        apiSource: "system",
                         channelMode: "local",
+                        baseUrl: channels[0]?.baseUrl || "",
+                        apiKey: "system",
                         apiFormat: "openai",
                         channels,
                         models,
-                        imageModel: normalizeModelOptionValue(config.imageModel || config.model, channels),
-                        videoModel: normalizeModelOptionValue(config.videoModel || "grok-imagine-video", channels),
-                        textModel: normalizeModelOptionValue(config.textModel || config.model, channels),
-                        audioModel: normalizeModelOptionValue(config.audioModel || defaultConfig.audioModel, channels),
+                        model,
+                        imageModel,
+                        videoModel,
+                        textModel,
+                        audioModel,
                         audioVoice: config.audioVoice || defaultConfig.audioVoice,
                         audioFormat: config.audioFormat || defaultConfig.audioFormat,
                         audioSpeed: config.audioSpeed || defaultConfig.audioSpeed,
-                        audioInstructions: config.audioInstructions || "",
+                        audioInstructions: "",
                         videoSeconds: config.videoSeconds || "5",
                         vquality: config.vquality || "720",
                         videoGenerateAudio: config.videoGenerateAudio || "true",
                         videoWatermark: config.videoWatermark || "false",
+                        systemPrompt: "",
                         canvasImageCount: config.canvasImageCount || "1",
                         modelPointCosts: isRecord(persistedConfig.modelPointCosts) ? normalizeModelPointCosts(persistedConfig.modelPointCosts) : {},
                         generationPointMultipliers: normalizeGenerationPointMultipliers(persistedConfig.generationPointMultipliers),
@@ -299,6 +358,7 @@ export const useConfigStore = create<ConfigStore>()(
 );
 
 function normalizeModelList(models: string[], channels: ModelChannel[]) {
+    if (!channels.length) return [];
     const allModelOptions = channels.flatMap((channel) => channel.models.map((model) => encodeChannelModel(channel.id, model)));
     return Array.from(new Set((models || []).map((model) => model.trim()).filter(Boolean)))
         .map((model) => normalizeModelOptionValue(model, channels))
@@ -349,6 +409,10 @@ export function normalizeGenerationConcurrency(settings?: Partial<GenerationConc
     };
 }
 
+function normalizeCanvasImageCount(value: unknown) {
+    return String(clampInteger(value, 1, 10, Number(defaultConfig.canvasImageCount) || 1));
+}
+
 function clampInteger(value: unknown, min: number, max: number, fallback: number) {
     const numberValue = Math.floor(Number(value));
     if (!Number.isFinite(numberValue)) return fallback;
@@ -364,7 +428,7 @@ export function createModelChannel(channel?: Partial<ModelChannel>): ModelChanne
     return {
         id: channel?.id?.trim() || nanoid(),
         name: channel?.name?.trim() || "新渠道",
-        baseUrl: channel?.baseUrl?.trim() || OPENAI_BASE_URL,
+        baseUrl: channel?.baseUrl?.trim() || DEFAULT_SYSTEM_BASE_URL,
         apiKey: channel?.apiKey || "",
         apiFormat: channel?.apiFormat === "gemini" ? "gemini" : "openai",
         models: uniqueRawModels(channel?.models || []),
@@ -400,7 +464,25 @@ export function modelOptionsFromChannels(channels: ModelChannel[]) {
     return uniqueModelOptions(channels.flatMap((channel) => channel.models.map((model) => encodeChannelModel(channel.id, model))));
 }
 
+function chooseSystemModel(currentValue: string, adminDefault: string | undefined, channels: ModelChannel[], options: string[]) {
+    const current = normalizeModelOptionValue(currentValue, channels);
+    if (current && options.includes(current)) return current;
+    const matchedByName = encodeSystemModelByName(modelOptionName(currentValue), channels);
+    if (matchedByName && options.includes(matchedByName)) return matchedByName;
+    const defaultModel = encodeSystemModelByName(adminDefault || "", channels);
+    if (defaultModel && options.includes(defaultModel)) return defaultModel;
+    return options[0] || "";
+}
+
+function encodeSystemModelByName(model: string, channels: ModelChannel[]) {
+    const name = model.trim();
+    if (!name) return "";
+    const channel = channels.find((item) => item.models.includes(name));
+    return channel ? encodeChannelModel(channel.id, name) : "";
+}
+
 export function normalizeModelOptionValue(value: string | undefined, channels: ModelChannel[]) {
+    if (!channels.length) return "";
     const model = (value || "").trim();
     if (!model) return "";
     const decoded = decodeChannelModel(model);
@@ -410,7 +492,7 @@ export function normalizeModelOptionValue(value: string | undefined, channels: M
     }
     const legacyModel = model;
     const channel = channels.find((item) => item.models.includes(legacyModel)) || channels[0];
-    return channel && channel.models.includes(legacyModel) ? encodeChannelModel(channel.id, legacyModel) : model;
+    return channel && channel.models.includes(legacyModel) ? encodeChannelModel(channel.id, legacyModel) : "";
 }
 
 export function resolveModelChannel(config: AiConfig, value: string) {
@@ -428,31 +510,23 @@ export function resolveModelRequestConfig(config: AiConfig, value: string) {
         baseUrl: channel.baseUrl,
         apiKey: channel.apiKey,
         apiFormat: channel.apiFormat,
+        systemPrompt: "",
     };
 }
 
 function normalizeChannels(config: AiConfig) {
     const persistedChannels = Array.isArray(config.channels) ? config.channels : [];
-    const channels = persistedChannels.map((channel, index) =>
-        createModelChannel({
-            ...channel,
-            id: channel.id || (index === 0 ? "default" : `channel-${index + 1}`),
-            name: channel.name || (index === 0 ? "默认渠道" : `渠道 ${index + 1}`),
-            models: uniqueRawModels(channel.models || []),
-        }),
-    );
-    if (!channels.length) {
-        channels.push(
+    const channels = persistedChannels
+        .filter((channel) => channel.baseUrl?.trim().startsWith("/api/ai/system/"))
+        .map((channel, index) =>
             createModelChannel({
-                id: "default",
-                name: "默认渠道",
-                baseUrl: config.baseUrl || defaultConfig.baseUrl,
-                apiKey: config.apiKey || "",
-                apiFormat: config.apiFormat || defaultConfig.apiFormat,
-                models: uniqueRawModels([...(config.models || []), config.model, config.imageModel, config.videoModel, config.textModel, config.audioModel]),
+                ...channel,
+                id: channel.id || (index === 0 ? "default" : `channel-${index + 1}`),
+                name: channel.name || (index === 0 ? "默认渠道" : `渠道 ${index + 1}`),
+                apiKey: "system",
+                models: uniqueRawModels(channel.models || []),
             }),
         );
-    }
     return channels.map((channel) => ({ ...channel, models: uniqueRawModels(channel.models) }));
 }
 

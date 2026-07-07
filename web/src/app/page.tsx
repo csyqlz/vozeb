@@ -427,6 +427,9 @@ export default function HomePage() {
                     <div className="landing-footer-actions">
                         <div className="landing-footer-links">
                             <div className="landing-footer-link-row landing-footer-policy-links">
+                                <Link href="/announcements" className="landing-footer-link">
+                                    网站公告
+                                </Link>
                                 <Link href={site.termsUrl || "/terms"} className="landing-footer-link">
                                     使用条款
                                 </Link>

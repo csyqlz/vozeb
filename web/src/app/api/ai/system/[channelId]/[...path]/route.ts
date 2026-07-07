@@ -241,7 +241,10 @@ function imageQualityMultiplier(payload: Record<string, unknown>, multipliers?: 
 }
 
 function videoParameterMultiplier(payload: Record<string, unknown>, multipliers?: GenerationPointMultipliers) {
-    return multiplierValue(multipliers?.videoQuality, normalizeVideoQualityKey(payload.resolution_name || payload.resolution || payload.quality || payload.vquality)) * multiplierValue(multipliers?.videoSeconds, normalizeVideoSecondsKey(payload.duration || payload.seconds));
+    return (
+        multiplierValue(multipliers?.videoQuality, normalizeVideoQualityKey(payload.resolution_name || payload.resolution || payload.quality || payload.vquality)) *
+        multiplierValue(multipliers?.videoSeconds, normalizeVideoSecondsKey(payload.duration || payload.seconds))
+    );
 }
 
 function multiplierValue(values: Record<string, number> | undefined, key: string) {
@@ -250,14 +253,18 @@ function multiplierValue(values: Record<string, number> | undefined, key: string
 }
 
 function normalizeImageQualityKey(value: unknown) {
-    const key = String(value || "auto").trim().toLowerCase();
+    const key = String(value || "auto")
+        .trim()
+        .toLowerCase();
     if (key === "hd") return "high";
     if (key === "standard") return "medium";
     return key || "auto";
 }
 
 function normalizeVideoQualityKey(value: unknown) {
-    const key = String(value || "720").trim().toLowerCase();
+    const key = String(value || "720")
+        .trim()
+        .toLowerCase();
     if (key === "low") return "480";
     if (key === "auto" || key === "medium" || key === "high") return "720";
     return key.replace(/p$/, "") || "720";

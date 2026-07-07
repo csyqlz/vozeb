@@ -130,6 +130,19 @@ export async function listGenerationLogs(options: GenerationLogListOptions = {})
     return { items: filtered.slice(startIndex, startIndex + pageSize), total, page, pageSize };
 }
 
+export async function listUserGenerationLogsForDelete(userId: string, ids: string[]) {
+    const targetUserId = userId.trim();
+    const idSet = new Set(ids.map((id) => id.trim()).filter(Boolean));
+    if (!targetUserId || !idSet.size) return [];
+
+    const db = await readGenerationLogDb();
+    const userLogs = db.logs.filter((log) => log.userId === targetUserId);
+    const requestedLogs = userLogs.filter((log) => idSet.has(log.id));
+    const assetUrls = new Set(requestedLogs.flatMap((log) => log.assets.map(stableAssetUrl).filter(Boolean)));
+
+    return userLogs.filter((log) => idSet.has(log.id) || log.assets.some((asset) => assetUrls.has(stableAssetUrl(asset))));
+}
+
 export async function recordGenerationLog(input: GenerationLogInput) {
     return mutateGenerationLogDb(async (db) => {
         const now = new Date().toISOString();
@@ -435,6 +448,10 @@ function collectReferencedLocalAssetPaths(db: GenerationLogDatabase) {
 
 function localAssetUrls(asset: GenerationLogAsset) {
     return [asset.url, asset.serverUrl].filter((url): url is string => Boolean(url && isServerAssetUrl(url)));
+}
+
+function stableAssetUrl(asset: GenerationLogAsset) {
+    return asset.remoteUrl || asset.serverUrl || asset.url || "";
 }
 
 function localAssetUrlToPath(url: string) {
