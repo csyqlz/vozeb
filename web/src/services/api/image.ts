@@ -122,6 +122,7 @@ const IMAGE_MAX_RATIO = 3;
 const IMAGE_OUTPUT_FORMAT = "png";
 const IMAGE_TASK_POLL_INTERVAL_MS = 1800;
 const IMAGE_TASK_TIMEOUT_MS = 30 * 60 * 1000;
+const IMAGE_TASK_CREATE_RETRY_INTERVAL_MS = 2500;
 
 function normalizeQuality(quality: string) {
     const value = quality.trim().toLowerCase();
@@ -669,35 +670,42 @@ export async function createImageGenerationTask(config: AiConfig, prompt: string
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
     const taskReferences = await Promise.all(references.map(referenceToTaskInput));
     const taskMask = mask ? await referenceToTaskInput(mask) : undefined;
-    const response = await fetch("/api/image-tasks", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            kind: references.length || mask ? "edit" : "generation",
-            config: {
-                apiSource: requestConfig.apiSource,
-                baseUrl: requestConfig.baseUrl,
-                apiKey: requestConfig.apiKey,
-                apiFormat: requestConfig.apiFormat,
-                model: requestConfig.model,
-                quality: requestConfig.quality,
-                size: requestConfig.size,
-                systemPrompt: "",
-                advancedConfig: requestConfig.advancedConfig,
-            },
-            prompt,
-            references: taskReferences,
-            mask: taskMask,
-            source: options?.logSource || "image-workbench",
-            title: options?.logTitle || "",
-        }),
-        signal: options?.signal,
-    });
-    syncUserPointsFromHeaders(response.headers, requestConfig.apiSource);
-    if (!response.ok) throw new Error(await readFetchError(response, "创建图片任务失败"));
-    const payload = (await response.json()) as ImageTaskPayload;
-    if (!payload.task?.id) throw new Error(payload.error || "创建图片任务失败");
-    return payload.task;
+    const startedAt = Date.now();
+    for (;;) {
+        const response = await fetch("/api/image-tasks", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                kind: references.length || mask ? "edit" : "generation",
+                config: {
+                    apiSource: requestConfig.apiSource,
+                    baseUrl: requestConfig.baseUrl,
+                    apiKey: requestConfig.apiKey,
+                    apiFormat: requestConfig.apiFormat,
+                    model: requestConfig.model,
+                    quality: requestConfig.quality,
+                    size: requestConfig.size,
+                    systemPrompt: "",
+                    advancedConfig: requestConfig.advancedConfig,
+                },
+                prompt,
+                references: taskReferences,
+                mask: taskMask,
+                source: options?.logSource || "image-workbench",
+                title: options?.logTitle || "",
+            }),
+            signal: options?.signal,
+        });
+        syncUserPointsFromHeaders(response.headers, requestConfig.apiSource);
+        if (response.status === 429 && Date.now() - startedAt < IMAGE_TASK_TIMEOUT_MS) {
+            await delay(IMAGE_TASK_CREATE_RETRY_INTERVAL_MS, options?.signal);
+            continue;
+        }
+        if (!response.ok) throw new Error(await readFetchError(response, "创建图片任务失败"));
+        const payload = (await response.json()) as ImageTaskPayload;
+        if (!payload.task?.id) throw new Error(payload.error || "创建图片任务失败");
+        return payload.task;
+    }
 }
 
 async function referenceToTaskInput(reference: ReferenceImage) {

@@ -5,6 +5,8 @@ description: 当前版本已实现但仍需人工验证的变更项
 
 # 待测试
 
+- 画布批量生图：当图片并发上限为 3 且配置 `count=4` 时，应先创建并运行 3 个图片任务，第 4 个等待前面任务释放槽位后再创建，不应直接显示 429 失败。
+- 图片异步任务轮询：后台接口高级配置填写 `queryPath`、`resultField`、`statusField` 后，后端任务完成并返回图片地址时，前端应能从 `/api/image-tasks/:id` 取回结果并显示。
 - 生图异步任务：OpenAI 兼容接口先返回 `task_id` 时，服务端应继续轮询 `/images/generations/:task_id` 并回填最终图片，不应一直转圈。
 - 图生图上游兼容：当 `/images/edits` 不支持 multipart 文件上传时，应自动改用 JSON `image/images` 参数提交，仍能正常生成或返回清晰失败原因。
 - 视频异步任务：`/videos` 不可用但 `/video/generations` 或 `/videos/generations` 可用时，视频工作台应能创建任务、恢复轮询、生成结果并在失败重试时复用当前记录。

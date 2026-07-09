@@ -2332,6 +2332,7 @@ function VozebCanvasPage() {
             try {
                 if (mode === "image") {
                     const count = getGenerationCount(generationConfig.count);
+                    const batchConcurrency = Math.max(1, Math.min(10, Math.floor(Number(effectiveConfig.generationConcurrency?.image) || count)));
                     const isConfigNode = sourceNode?.type === CanvasNodeType.Config;
                     const isImageNode = sourceNode?.type === CanvasNodeType.Image;
                     const isEmptyImageNode = isImageNode && !sourceNode?.metadata?.content;
@@ -2427,24 +2428,22 @@ function VozebCanvasPage() {
                     if (count > 1) startGenerationRequest(rootId, nodeId, nodeId, controller);
                     let hasSuccess = false;
                     let hasFailure = false;
-                    await Promise.all(
-                        targetIds.map(async (targetId) => {
-                            try {
-                                await startAndCompleteImageTask(targetId, { ...generationConfig, count: "1" }, effectivePrompt, referenceImages, undefined, controller);
-                                hasSuccess = true;
-                                if (isConfigNode) setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS, errorDetails: undefined } } : node)));
-                                return true;
-                            } catch (error) {
-                                if (isGenerationCanceled(error)) return false;
-                                const errorDetails = error instanceof Error ? error.message : "生成失败";
-                                hasFailure = true;
-                                setNodes((prev) => prev.map((node) => (node.id === targetId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails, imageTask: undefined } } : node)));
-                            } finally {
-                                finishGenerationRequest(targetId, controller);
-                            }
-                            return false;
-                        }),
-                    );
+                    await runWithConcurrencyLimit(targetIds, batchConcurrency, async (targetId) => {
+                        try {
+                            await startAndCompleteImageTask(targetId, { ...generationConfig, count: "1" }, effectivePrompt, referenceImages, undefined, controller);
+                            hasSuccess = true;
+                            if (isConfigNode) setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS, errorDetails: undefined } } : node)));
+                            return true;
+                        } catch (error) {
+                            if (isGenerationCanceled(error)) return false;
+                            const errorDetails = error instanceof Error ? error.message : "生成失败";
+                            hasFailure = true;
+                            setNodes((prev) => prev.map((node) => (node.id === targetId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails, imageTask: undefined } } : node)));
+                        } finally {
+                            finishGenerationRequest(targetId, controller);
+                        }
+                        return false;
+                    });
                     if (count > 1) finishGenerationRequest(rootId, controller);
                     if (controller.signal.aborted) {
                         setNodes((prev) => prev.map((node) => (node.id === nodeId && isConfigNode && node.metadata?.status === NODE_STATUS_LOADING ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_IDLE, errorDetails: undefined } } : node)));
@@ -3574,6 +3573,21 @@ async function hydrateAssistantImages(sessions: CanvasAssistantSession[]) {
 
 function getGenerationCount(count: string) {
     return Math.max(1, Math.min(15, Math.floor(Math.abs(Number(count)) || 1)));
+}
+
+async function runWithConcurrencyLimit<T>(items: T[], limit: number, worker: (item: T, index: number) => Promise<unknown>) {
+    const workerCount = Math.max(1, Math.min(items.length, Math.floor(limit) || 1));
+    let nextIndex = 0;
+    await Promise.all(
+        Array.from({ length: workerCount }, async () => {
+            for (;;) {
+                const index = nextIndex;
+                nextIndex += 1;
+                if (index >= items.length) return;
+                await worker(items[index], index);
+            }
+        }),
+    );
 }
 
 function applyNodeConfigPatch(node: CanvasNodeData, patch: Partial<CanvasNodeData["metadata"]>) {

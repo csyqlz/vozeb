@@ -816,7 +816,7 @@ async function parseImagePayloadOrPoll(config: ImageTaskConfig, payload: ImageAp
 }
 
 async function pollOpenAiImageTask(config: ImageTaskConfig, taskId: string, mediaBaseUrl: string, pollBaseUrl: string, cookie: string, explicitPollUrl = ""): Promise<ImageTaskResult> {
-    const pollUrls = imageTaskPollUrls(pollBaseUrl, taskId, explicitPollUrl);
+    const pollUrls = imageTaskPollUrls(config, pollBaseUrl, taskId, explicitPollUrl);
     let lastError = "";
     for (let attempt = 0; attempt < IMAGE_TASK_POLL_ATTEMPTS; attempt += 1) {
         for (const pollUrl of pollUrls) {
@@ -833,7 +833,8 @@ async function pollOpenAiImageTask(config: ImageTaskConfig, taskId: string, medi
             if (image) return image;
             const error = readImagePayloadError(payload);
             if (error) throw new Error(error);
-            payload.status = readImageTaskStatus(payload) || payload.status;
+            payload.status = readConfiguredImageTaskStatus(config, payload) || readImageTaskStatus(payload) || payload.status;
+            if (isFailedImageStatus(payload.status)) throw new Error("图片生成失败");
             if (!isPendingImageStatus(payload.status)) throw new Error("图片任务完成但没有返回图片");
         }
         await delay(IMAGE_TASK_POLL_INTERVAL_MS);
@@ -844,7 +845,7 @@ async function pollOpenAiImageTask(config: ImageTaskConfig, taskId: string, medi
 function parseImagePayloadCompat(payload: ImageApiResponse, baseUrl: string, config: ImageTaskConfig): ImageTaskResult | null {
     const error = readImagePayloadError(payload);
     if (error) throw new Error(error);
-    return findImageResult(payload, baseUrl, config);
+    return readConfiguredImageResult(config, payload, baseUrl) || findImageResult(payload, baseUrl, config);
 }
 
 function findImageResult(value: unknown, baseUrl: string, config: ImageTaskConfig, depth = 0): ImageTaskResult | null {
@@ -944,6 +945,71 @@ function readImageTaskStatus(payload: ImageApiResponse) {
     return findStringByKeys(payload, IMAGE_STATUS_KEYS).toLowerCase();
 }
 
+function readConfiguredImageResult(config: ImageTaskConfig, record: unknown, baseUrl: string) {
+    for (const path of configuredFieldPaths(config.advancedConfig?.resultField)) {
+        const value = valueAtConfiguredPath(record, path);
+        const image = configuredImageResultValue(value, baseUrl, config);
+        if (image) return image;
+    }
+    return null;
+}
+
+function readConfiguredImageTaskStatus(config: ImageTaskConfig, record: unknown) {
+    return readConfiguredStringValue(record, config.advancedConfig?.statusField, "status").toLowerCase();
+}
+
+function configuredImageResultValue(value: unknown, baseUrl: string, config: ImageTaskConfig): ImageTaskResult | null {
+    if (typeof value === "string" || typeof value === "number") {
+        const text = String(value).trim();
+        const dataUrl = resolveImageBase64Like(text);
+        return resolveImageUrlLike(text, baseUrl, config, true) || (dataUrl ? { dataUrl } : null);
+    }
+    return findImageResult(value, baseUrl, config);
+}
+
+function readConfiguredStringValue(record: unknown, fieldConfig: string | undefined, mode: "media" | "status") {
+    for (const path of configuredFieldPaths(fieldConfig)) {
+        const value = valueAtConfiguredPath(record, path);
+        const text = configuredValueText(value, mode);
+        if (text) return text;
+    }
+    return "";
+}
+
+function configuredFieldPaths(value: string | undefined) {
+    return (value || "")
+        .split(/\r?\n|,|，|;|；|\s+\|\s+|\s+\/\s+/)
+        .map((item) => item.trim())
+        .filter((item) => item && !item.startsWith("/") && !item.includes(":task_id") && !item.includes("{task_id}"));
+}
+
+function valueAtConfiguredPath(value: unknown, path: string): unknown {
+    const parts = path
+        .replace(/\[(\d+)\]/g, ".$1")
+        .split(".")
+        .map((item) => item.trim())
+        .filter(Boolean);
+    let current = value;
+    for (const part of parts) {
+        if (Array.isArray(current)) {
+            const index = Number(part);
+            current = Number.isInteger(index) ? current[index] : undefined;
+            continue;
+        }
+        if (!isRecord(current)) return undefined;
+        current = current[part] ?? current[Object.keys(current).find((key) => key.toLowerCase() === part.toLowerCase()) || ""];
+    }
+    return current;
+}
+
+function configuredValueText(value: unknown, mode: "media" | "status"): string {
+    if (typeof value === "string") return value.trim();
+    if (typeof value === "number" || typeof value === "boolean") return String(value);
+    if (mode === "media") return "";
+    if (isRecord(value)) return findStringByKeys(value, IMAGE_STATUS_KEYS);
+    return "";
+}
+
 function readImagePollUrl(config: ImageTaskConfig, payload: ImageApiResponse, mediaBaseUrl: string, pollBaseUrl: string) {
     const value = findStringByKeys(payload, IMAGE_POLL_URL_KEYS);
     if (!value || config.baseUrl.startsWith("/api/ai/system/")) return "";
@@ -974,16 +1040,47 @@ function findStringByKeys(value: unknown, keys: string[], depth = 0): string {
 
 function isPendingImageStatus(status?: string) {
     const value = (status || "").toLowerCase();
-    return !value || ["pending", "queued", "running", "processing", "in_progress", "created"].includes(value);
+    return !value || ["pending", "queued", "running", "processing", "in_progress", "created", "submitted", "waiting", "generating"].includes(value);
 }
 
-function imageTaskPollUrls(requestUrl: string, taskId: string, explicitPollUrl = "") {
+function isFailedImageStatus(status?: string) {
+    return ["failed", "failure", "error", "cancelled", "canceled", "expired", "rejected"].includes((status || "").toLowerCase());
+}
+
+function imageTaskPollUrls(config: ImageTaskConfig, requestUrl: string, taskId: string, explicitPollUrl = "") {
     const cleanUrl = requestUrl.split("?")[0].replace(/\/+$/, "");
     const encodedTaskId = encodeURIComponent(taskId);
-    const pollUrls = [explicitPollUrl, `${cleanUrl}/${encodedTaskId}`];
+    const configuredPollUrls: string[] = [];
+    const configuredPath = normalizeAdvancedImagePath(config.advancedConfig?.queryPath);
+    if (/^https?:\/\//i.test(configuredPath)) configuredPollUrls.push(applyTaskIdToImagePath(configuredPath, taskId));
+    else if (configuredPath) configuredPollUrls.push(`${imageApiBaseFromRequestUrl(cleanUrl, config)}${applyTaskIdToImagePath(configuredPath, taskId)}`);
+    const pollUrls = [explicitPollUrl, ...configuredPollUrls, `${cleanUrl}/${encodedTaskId}`];
     const generationsUrl = cleanUrl.replace(/\/images\/(?:generations|edits)$/i, "/images/generations");
     if (generationsUrl !== cleanUrl) pollUrls.push(`${generationsUrl}/${encodedTaskId}`);
     return Array.from(new Set(pollUrls.filter(Boolean)));
+}
+
+function imageApiBaseFromRequestUrl(requestUrl: string, config: ImageTaskConfig) {
+    const configuredCreatePath = normalizeAdvancedImagePath(config.advancedConfig?.createPath);
+    if (configuredCreatePath && requestUrl.toLowerCase().endsWith(configuredCreatePath.toLowerCase())) return requestUrl.slice(0, -configuredCreatePath.length).replace(/\/+$/, "");
+    return requestUrl.replace(/\/images\/(?:generations|edits)$/i, "").replace(/\/+$/, "");
+}
+
+function normalizeAdvancedImagePath(value?: string) {
+    const path = (value || "").trim();
+    if (!path || /^https?:\/\//i.test(path)) return path;
+    return path.startsWith("/") ? path : `/${path}`;
+}
+
+function applyTaskIdToImagePath(path: string, taskId: string) {
+    const encodedTaskId = encodeURIComponent(taskId);
+    const templated = path.replace(/\{(?:task_id|taskId|id)\}/g, encodedTaskId).replace(/:(?:task_id|taskId|id)\b/g, encodedTaskId);
+    if (templated !== path) return templated;
+    return `${path.replace(/\/+$/, "")}/${encodedTaskId}`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function resolveTaskMediaUrl(config: ImageTaskConfig, value: string, baseUrl: string) {
